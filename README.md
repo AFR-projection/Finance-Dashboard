@@ -1,36 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Ledgerly — AI Finance Agent
 
-## Getting Started
+Personal AI finance assistant with WhatsApp (Baileys), Telegram, and a premium web dashboard.
 
-First, run the development server:
+**Reliability principle:** AI understands intent and calls tools. The **Finance Engine** validates and mutates data. **PostgreSQL** is the single source of truth.
+
+## Stack
+
+- Next.js 16 + TypeScript (strict) + Tailwind + Shadcn UI
+- Prisma + Neon PostgreSQL
+- Auth.js (credentials + optional Google)
+- Gemini / OpenRouter (user-configurable encrypted API keys)
+- Grammy (Telegram) + Baileys (WhatsApp)
+- Docker Compose for VPS deployment
+
+## Deploy VPS (Docker — aman bareng project lain)
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+chmod +x deploy.sh redeploy.sh scripts/*.sh
+./deploy.sh
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Default port host: **3001** (auto pilih 3002/5000/8082/9000 jika sibuk).  
+Tidak memakai 22/80/443/3000/8080/8081. Postgres/Redis internal.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Setelah selesai lihat: `deploy/generated/PORT.txt` + snippet Nginx.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Detail: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
-## Learn More
+## Local development
 
-To learn more about Next.js, take a look at the following resources:
+See **[docs/SETUP.md](docs/SETUP.md)**.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm install
+cp .env.example .env
+npx prisma generate && npx prisma db push
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Docs
 
-## Deploy on Vercel
+| Doc | Path |
+|-----|------|
+| Setup | [docs/SETUP.md](docs/SETUP.md) |
+| API | [docs/API.md](docs/API.md) |
+| Deployment (VPS) | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) |
+| Testing | [docs/TESTING.md](docs/TESTING.md) |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Scripts
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+./deploy.sh / ./redeploy.sh
+./scripts/status.sh / ./scripts/logs.sh
+npm run dev / npm test
+```
+
+## Architecture
+
+```
+WhatsApp / Telegram / Web
+        ↓
+   AI Agent (tools)
+        ↓
+  Finance Engine
+        ↓
+   Neon PostgreSQL
+```
+
+## License
+
+Private / proprietary unless otherwise stated.

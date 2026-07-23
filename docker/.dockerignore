@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+.env
+.env.*
+!.env.example
+workers/.wa-auth
+coverage
+*.log
+README.md
+docs
