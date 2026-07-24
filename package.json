@@ -23,9 +23,9 @@
     "pm2:reload": "pm2 reload ecosystem.config.cjs --update-env",
     "pm2:logs": "pm2 logs",
     "pm2:status": "pm2 status",
-    "docker:data": "docker compose -f docker/docker-compose.yml up -d postgres redis",
-    "docker:up": "docker compose -f docker/docker-compose.yml --profile full up -d --build",
-    "docker:down": "docker compose -f docker/docker-compose.yml --profile full down",
+    "docker:data": "docker compose -f docker/docker-compose.yml up -d redis",
+    "docker:up": "docker compose -f docker/docker-compose.yml up -d --build",
+    "docker:down": "docker compose -f docker/docker-compose.yml down",
     "docker:logs": "docker compose -f docker/docker-compose.yml logs -f"
   },
   "prisma": {

@@ -1,3 +1,7 @@
+# Keep shell scripts LF for Linux VPS (CRLF breaks shebang)
 *.sh text eol=lf
+docker/entrypoint.sh text eol=lf
 deploy.sh text eol=lf
+install.sh text eol=lf
+update.sh text eol=lf
 redeploy.sh text eol=lf

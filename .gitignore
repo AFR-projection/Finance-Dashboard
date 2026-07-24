@@ -38,8 +38,12 @@ yarn-error.log*
 .env*
 !.env.example
 
-# generated deploy info (recreated by ./deploy.sh)
+# generated deploy info (recreated by ./install.sh)
 /deploy/generated/
+
+# env backups from ./update.sh
+/.env-backups/
+.deployed
 
 # whatsapp baileys session
 workers/.wa-auth/

@@ -1,30 +1,16 @@
-# Ledgerly — Docker Compose (aman di VPS yang sudah ramai)
+# Ledgerly — Docker Compose (Neon external + Redis internal)
 #
-# Hanya publish 1 port ke host: APP_PORT (dipilih ./deploy.sh)
-# Postgres & Redis INTERNAL → tidak tabrakan dengan project lain.
+# Internet → Nginx (:443) → app (APP_PORT host)
+#                        ↘ redis (internal)
+# Neon PostgreSQL (external — DATABASE_URL di .env)
 #
-# Start: ./deploy.sh
+# Install: ./install.sh
+# Rebuild: ./deploy.sh
+# Update:  ./update.sh
 
 name: ledgerly
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-ledgerly}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ledgerly_secret_change_me}
-      POSTGRES_DB: ${POSTGRES_DB:-ledgerly}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ledgerly} -d ${POSTGRES_DB:-ledgerly}"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-    networks:
-      - ledgerly_net
-
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -42,6 +28,9 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        # Dummy cukup untuk build; runtime pakai env_file DATABASE_URL (Neon)
+        DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build?schema=public
     restart: unless-stopped
     ports:
       - "${APP_PORT:-3047}:3000"
@@ -51,18 +40,11 @@ services:
       NODE_ENV: production
       HOSTNAME: "0.0.0.0"
       PORT: "3000"
-      DATABASE_URL: postgresql://${POSTGRES_USER:-ledgerly}:${POSTGRES_PASSWORD:-ledgerly_secret_change_me}@postgres:5432/${POSTGRES_DB:-ledgerly}
       REDIS_URL: redis://redis:6379
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://127.0.0.1:3047}
-      AUTH_URL: ${AUTH_URL:-http://127.0.0.1:3047}
-      WHATSAPP_WORKER_SECRET: ${WHATSAPP_WORKER_SECRET}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      AUTH_SECRET: ${AUTH_SECRET}
       TELEGRAM_EMBEDDED: "0"
       DOCKER: "1"
+      SKIP_DB_PUSH: "0"
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
     networks:
@@ -72,45 +54,45 @@ services:
       interval: 15s
       timeout: 10s
       retries: 20
-      start_period: 90s
-    command: sh -c "npx prisma db push && npx tsx server.ts"
+      start_period: 120s
+    # entrypoint: prisma db push → server.ts
 
   telegram-worker:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build?schema=public
     restart: unless-stopped
     env_file:
       - ../.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-ledgerly}:${POSTGRES_PASSWORD:-ledgerly_secret_change_me}@postgres:5432/${POSTGRES_DB:-ledgerly}
       REDIS_URL: redis://redis:6379
       NEXT_PUBLIC_APP_URL: http://app:3000
-      WHATSAPP_WORKER_SECRET: ${WHATSAPP_WORKER_SECRET}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       DOCKER: "1"
+      SKIP_DB_PUSH: "1"
     depends_on:
       app:
         condition: service_healthy
     networks:
       - ledgerly_net
-    command: npx tsx workers/telegram/index.ts
+    entrypoint: ["npx", "tsx", "workers/telegram/index.ts"]
 
   whatsapp-worker:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build?schema=public
     restart: unless-stopped
     env_file:
       - ../.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-ledgerly}:${POSTGRES_PASSWORD:-ledgerly_secret_change_me}@postgres:5432/${POSTGRES_DB:-ledgerly}
       REDIS_URL: redis://redis:6379
       NEXT_PUBLIC_APP_URL: http://app:3000
-      WHATSAPP_WORKER_SECRET: ${WHATSAPP_WORKER_SECRET}
       WHATSAPP_AUTH_DIR: /data/wa-auth
-      WHATSAPP_OWNER_USER_ID: ${WHATSAPP_OWNER_USER_ID:-}
       DOCKER: "1"
+      SKIP_DB_PUSH: "1"
     volumes:
       - wa_auth:/data/wa-auth
     depends_on:
@@ -118,10 +100,9 @@ services:
         condition: service_healthy
     networks:
       - ledgerly_net
-    command: npx tsx workers/whatsapp/index.ts
+    entrypoint: ["npx", "tsx", "workers/whatsapp/index.ts"]
 
 volumes:
-  postgres_data:
   redis_data:
   wa_auth:
 

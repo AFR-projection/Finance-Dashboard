@@ -1,5 +1,9 @@
 # syntax=docker/dockerfile:1
 
+# Ledgerly production image
+# Build-time: dummy DATABASE_URL (Prisma generate + Next build tanpa hit Neon)
+# Runtime: DATABASE_URL asli dari .env / compose → entrypoint prisma db push
+
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
@@ -13,7 +17,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-cert
   && rm -rf /var/lib/apt/lists/*
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+# Prisma schema requires env("DATABASE_URL") at generate/build.
+# Real Neon URL is injected only at runtime (see entrypoint).
+ARG DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build?schema=public"
+ENV DATABASE_URL=$DATABASE_URL
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PRIVATE_STANDALONE=false
+
 RUN npx prisma generate
 RUN npm run build
 
@@ -36,6 +47,8 @@ COPY --from=builder /app/tsconfig.json ./
 COPY --from=builder /app/next.config.ts ./
 COPY --from=builder /app/server.ts ./
 COPY --from=builder /app/ecosystem.config.cjs ./
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 3000
-CMD ["npx", "tsx", "server.ts"]
+ENTRYPOINT ["/entrypoint.sh"]

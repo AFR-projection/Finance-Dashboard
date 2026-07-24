@@ -1,0 +1,136 @@
+# Deploy Ledgerly di VPS Ubuntu (Production Guide)
+
+Panduan production untuk user non-developer.  
+Target: VPS Ubuntu fresh + domain/IP → `./install.sh` → selesai dengan SSL/HTTPS.
+
+**Database produksi = Neon PostgreSQL (eksternal).**  
+Tidak ada Postgres di dalam Docker — data keuangan aman meski VPS down/corrupt.
+
+Repo: https://github.com/AFR-projection/Finance-Dashboard
+
+---
+
+## 🔁 Redeploy / Update Versi Aplikasi
+
+Cukup 1 baris untuk naikkan fitur/fix terbaru:
+
+```bash
+cd /opt/ledgerly && ./update.sh
+```
+
+Script otomatis: `git pull` → backup `.env` → rebuild container → sync schema DB Neon (`prisma db push`) → health check.
+
+Tanpa `git pull` (hanya rebuild):
+
+```bash
+./deploy.sh
+```
+
+---
+
+## 🚀 Instalasi Pertama (Fresh Install)
+
+### 1) Clone repo
+
+```bash
+git clone https://github.com/AFR-projection/Finance-Dashboard.git /opt/ledgerly
+cd /opt/ledgerly
+chmod +x install.sh deploy.sh update.sh scripts/*.sh
+```
+
+### 2) Buat & isi file `.env`
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Pastikan **`DATABASE_URL`** berisi **1 baris utuh** connection string dari [Neon](https://console.neon.tech).
+
+Contoh bentuk (jangan commit secret asli):
+
+```env
+DATABASE_URL="postgresql://USER:PASSWORD@ep-xxxx.region.aws.neon.tech/neondb?sslmode=require"
+APP_DOMAIN="finance.domainkamu.com"
+```
+
+Opsional di `.env` / CLI:
+
+| Variabel | Keterangan |
+|----------|------------|
+| `APP_DOMAIN` | Domain untuk Nginx + Let's Encrypt |
+| `APP_PORT` | `auto` (default) atau angka port kosong |
+| `TELEGRAM_BOT_TOKEN` | Boleh dikosongkan — isi nanti di `/setup` |
+
+### 3) Jalankan installer
+
+```bash
+./install.sh
+```
+
+Atau dengan domain eksplisit:
+
+```bash
+APP_DOMAIN=finance.domainkamu.com ./install.sh
+```
+
+Installer akan:
+
+1. Install Docker (jika belum)  
+2. Validasi `DATABASE_URL` Neon  
+3. Generate secrets kosong  
+4. **Auto-detect port kosong** (aman di VPS multi-app)  
+5. Build & up: `app` + `redis` + bot workers  
+6. Generate Nginx + Certbot HTTPS (jika `APP_DOMAIN` diisi)  
+7. Health-check `/api/health`
+
+### 4) Setup owner
+
+Buka URL yang dicetak script → **`/setup`** → lalu **`/access`** → approve di Telegram.
+
+---
+
+## ⚙️ Ringkasan Arsitektur Deploy
+
+```text
+Internet → Nginx (:443 / SSL) → Next.js App (auto-port host)
+                              ↘ Redis (internal Docker)
+Neon PostgreSQL (external DB)
+WhatsApp Baileys (worker + volume persistent wa_auth)
+Telegram worker (Grammy)
+```
+
+| Komponen | Lokasi | Catatan |
+|----------|--------|---------|
+| Next.js + Socket.io | Container `app` | 1 port host (auto) |
+| Redis | Container internal | Session/cache worker |
+| PostgreSQL | **Neon cloud** | Sumber kebenaran data |
+| WA session | Volume `wa_auth` | Persist QR login |
+
+---
+
+## Perintah operasional
+
+```bash
+./install.sh              # pertama kali
+./deploy.sh               # rebuild tanpa git pull
+./update.sh               # git pull + rebuild + sync Neon
+./scripts/status.sh
+./scripts/logs.sh app
+./scripts/logs.sh whatsapp-worker
+./scripts/stop.sh
+```
+
+---
+
+## Troubleshooting singkat
+
+| Masalah | Solusi |
+|---------|--------|
+| Build Prisma / `DATABASE_URL` | Build pakai dummy URL; Neon hanya di **runtime**. Pastikan `.env` benar. |
+| `DATABASE_URL` ditolak script | Jangan pakai host `postgres` Docker — wajib Neon. |
+| Certbot gagal | DNS A record belum ke IP VPS — ulang: `sudo certbot --nginx -d DOMAIN` |
+| `/approve` bot diam | Isi token di `/setup`, `./deploy.sh`, cek `./scripts/logs.sh telegram-worker` |
+| Port bentrok | `APP_PORT=7341 ./deploy.sh` |
+
+Detail tambahan: [SELF_HOST.md](./SELF_HOST.md) · fitur produk: [README.md](./README.md)

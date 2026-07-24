@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers — Ledgerly Docker Deploy
+# Shared helpers — Ledgerly (Neon + Docker + Nginx)
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,8 +8,10 @@ ENV_FILE="${ROOT_DIR}/.env"
 ENV_EXAMPLE="${ROOT_DIR}/.env.example"
 DEPLOY_LOCK="${ROOT_DIR}/.deployed"
 GENERATED_DIR="${ROOT_DIR}/deploy/generated"
+ENV_BACKUP_DIR="${ROOT_DIR}/.env-backups"
+NGINX_SITE_AVAILABLE="/etc/nginx/sites-available/ledgerly"
+NGINX_SITE_ENABLED="/etc/nginx/sites-enabled/ledgerly"
 
-# Ports never used by Ledgerly (common on shared VPS / other stacks)
 BLOCKED_PORTS="22 25 53 80 443 3306 5432 6379 8000 8080 8081 8443 27017 3000"
 
 if [[ -t 1 ]]; then
@@ -42,13 +44,14 @@ docker_bin() {
   elif sudo_cmd docker info >/dev/null 2>&1; then
     echo "sudo docker"
   else
-    die "Docker daemon tidak bisa diakses. Coba: newgrp docker  atau logout/login."
+    die "Docker daemon tidak bisa diakses. Coba: newgrp docker atau logout/login."
   fi
 }
 
 compose() {
   local db
   db="$(docker_bin)"
+  [[ -f "$ENV_FILE" ]] || die ".env tidak ada — cp .env.example .env lalu isi DATABASE_URL Neon"
   if $db compose version >/dev/null 2>&1; then
     $db compose -f "$COMPOSE_FILE" --project-directory "$ROOT_DIR" --env-file "$ENV_FILE" "$@"
   elif command -v docker-compose >/dev/null 2>&1; then
@@ -66,7 +69,7 @@ ensure_docker() {
   fi
 
   warn "Docker belum ada — install otomatis..."
-  [[ -f /etc/os-release ]] || die "Auto-install Docker hanya untuk Linux (/etc/os-release)."
+  [[ -f /etc/os-release ]] || die "Auto-install Docker hanya untuk Linux."
   # shellcheck disable=SC1091
   . /etc/os-release
 
@@ -83,21 +86,33 @@ ensure_docker() {
       sudo_cmd apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
       ;;
     *)
-      die "Distro ${ID:-unknown}: install Docker manual dulu, lalu jalankan ulang ./deploy.sh"
+      die "Distro ${ID:-unknown}: install Docker manual, lalu ulang script."
       ;;
   esac
 
   sudo_cmd systemctl enable --now docker
   if [[ "$(id -u)" -ne 0 ]]; then
     sudo_cmd usermod -aG docker "$USER" || true
-    warn "User ditambahkan ke group docker (penuh setelah logout/login). Sementara pakai sudo."
+    warn "User ditambah ke group docker (penuh setelah logout/login)."
   fi
   ok "Docker terpasang"
 }
 
+ensure_nginx_certbot() {
+  if ! command -v nginx >/dev/null 2>&1; then
+    log "Install Nginx..."
+    sudo_cmd apt-get update -y
+    sudo_cmd apt-get install -y nginx
+  fi
+  if ! command -v certbot >/dev/null 2>&1; then
+    log "Install Certbot..."
+    sudo_cmd apt-get install -y certbot python3-certbot-nginx
+  fi
+  ok "Nginx + Certbot siap"
+}
+
 rand_b64() { openssl rand -base64 32 2>/dev/null | tr -d '\n' || head -c 32 /dev/urandom | base64 | tr -d '\n'; }
 rand_hex() { openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
-rand_pass() { openssl rand -base64 24 2>/dev/null | tr -d '\n/+' | head -c 32; }
 
 set_env_var() {
   local key="$1" value="$2" file="$3"
@@ -135,8 +150,7 @@ port_in_use() {
     netstat -tuln 2>/dev/null | grep -qE ":${p}([[:space:]]|$)" && return 0
   fi
   if command -v python3 >/dev/null 2>&1; then
-    # exit 0 = bind OK = free → port_in_use false
-    if python3 -c "import socket,sys;s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind(('0.0.0.0',$p))" 2>/dev/null; then
+    if python3 -c "import socket;s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind(('0.0.0.0',$p))" 2>/dev/null; then
       return 1
     fi
     return 0
@@ -152,27 +166,29 @@ is_blocked_port() {
   return 1
 }
 
-# Prefer rare host ports so we don't collide with other websites / stacks.
-# $1 = optional hard override from CLI (APP_PORT=7341 ./deploy.sh)
-# Values already in .env are reused only if still free.
+# $1 = optional CLI override
 pick_free_port() {
   local override="${1:-}"
   local preferred existing p
 
-  if [[ -n "$override" ]]; then
-    is_blocked_port "$override" && die "APP_PORT=${override} terlarang (umum dipakai stack lain). Contoh aman: 3047, 5183, 7341"
-    port_in_use "$override" && die "APP_PORT=${override} sedang dipakai. Biarkan kosong agar auto-pilih, atau pilih port lain."
+  if [[ -n "$override" && "$override" != "auto" ]]; then
+    is_blocked_port "$override" && die "APP_PORT=${override} terlarang. Contoh aman: 3047, 5183, 7341"
+    port_in_use "$override" && die "APP_PORT=${override} sedang dipakai."
     echo "$override"
     return
   fi
 
-  # Reuse previous deploy port if still free (skip empty / placeholder)
   existing="$(get_env_var APP_PORT "$ENV_FILE" 2>/dev/null || true)"
   if [[ -n "$existing" && "$existing" != "auto" ]] && ! is_blocked_port "$existing" && ! port_in_use "$existing"; then
     echo "$existing"
     return
   fi
   if [[ -n "$existing" && "$existing" != "auto" ]] && port_in_use "$existing"; then
+    # Jika port dipakai oleh container ledgerly sendiri, tetap reuse
+    if compose ps --status running 2>/dev/null | grep -q "ledgerly"; then
+      echo "$existing"
+      return
+    fi
     warn "Port lama ${existing} sibuk — mencari port baru..."
   fi
 
@@ -194,7 +210,7 @@ pick_free_port() {
     fi
   done
 
-  die "Tidak ketemu port bebas. Set manual: APP_PORT=7341 ./deploy.sh"
+  die "Tidak ketemu port bebas. Set: APP_PORT=7341"
 }
 
 detect_public_ip() {
@@ -204,18 +220,21 @@ detect_public_ip() {
     || echo "127.0.0.1"
 }
 
-# Create/refresh .env for Docker production (never clobber user secrets that look real).
-prepare_env() {
-  if [[ ! -f "$ENV_FILE" ]]; then
-    [[ -f "$ENV_EXAMPLE" ]] || die ".env.example tidak ada — clone repo tidak lengkap?"
-    cp "$ENV_EXAMPLE" "$ENV_FILE"
-    ok "Membuat .env dari .env.example"
-  else
-    ok ".env ditemukan"
-  fi
+validate_neon_database_url() {
+  local db
+  db="$(get_env_var DATABASE_URL "$ENV_FILE")"
+  [[ -n "$db" ]] || die "DATABASE_URL kosong di .env — paste connection string Neon (1 baris utuh)."
+  [[ "$db" != *"user:password@host"* ]] || die "DATABASE_URL masih placeholder — ganti dengan Neon."
+  [[ "$db" != *"@postgres:"* && "$db" != *"@postgres/"* ]] || die "DATABASE_URL mengarah ke Postgres Docker internal. Wajib Neon eksternal."
+  [[ "$db" == postgresql://* || "$db" == postgres://* ]] || die "DATABASE_URL harus postgresql://… (Neon)."
+  ok "DATABASE_URL Neon / eksternal valid"
+}
+
+# Generate secrets; keep Neon DATABASE_URL untouched.
+prepare_env_secrets() {
+  [[ -f "$ENV_FILE" ]] || die ".env tidak ada. Jalankan: cp .env.example .env && nano .env"
 
   local v
-
   v="$(get_env_var AUTH_SECRET "$ENV_FILE")"
   if [[ -z "$v" || "$v" == "generate-with-openssl-rand-base64-32" ]]; then
     set_env_var AUTH_SECRET "$(rand_b64)" "$ENV_FILE"
@@ -234,61 +253,47 @@ prepare_env() {
     ok "WHATSAPP_WORKER_SECRET digenerate"
   fi
 
-  v="$(get_env_var POSTGRES_PASSWORD "$ENV_FILE")"
-  if [[ -z "$v" || "$v" == "ledgerly_secret_change_me" ]]; then
-    set_env_var POSTGRES_PASSWORD "$(rand_pass)" "$ENV_FILE"
-    set_env_var POSTGRES_USER "ledgerly" "$ENV_FILE"
-    set_env_var POSTGRES_DB "ledgerly" "$ENV_FILE"
-    ok "POSTGRES_PASSWORD digenerate"
-  fi
-
-  [[ -n "$(get_env_var POSTGRES_USER "$ENV_FILE")" ]] || set_env_var POSTGRES_USER "ledgerly" "$ENV_FILE"
-  [[ -n "$(get_env_var POSTGRES_DB "$ENV_FILE")" ]] || set_env_var POSTGRES_DB "ledgerly" "$ENV_FILE"
-
   set_env_var HOSTNAME "0.0.0.0" "$ENV_FILE"
   set_env_var WHATSAPP_AUTH_DIR "/data/wa-auth" "$ENV_FILE"
   set_env_var TELEGRAM_EMBEDDED "0" "$ENV_FILE"
-  set_env_var SECURITY_LOG_DIR "./logs" "$ENV_FILE"
-
-  load_dotenv
+  set_env_var REDIS_URL "redis://redis:6379" "$ENV_FILE"
 }
 
-# Wire Docker-internal DB/Redis + public URL for chosen host port.
-apply_docker_urls() {
+apply_runtime_urls() {
   local port="$1"
-  local pguser pgpass pgdb ip
-
-  pguser="$(get_env_var POSTGRES_USER "$ENV_FILE")"; pguser="${pguser:-ledgerly}"
-  pgpass="$(get_env_var POSTGRES_PASSWORD "$ENV_FILE")"
-  pgdb="$(get_env_var POSTGRES_DB "$ENV_FILE")"; pgdb="${pgdb:-ledgerly}"
+  local domain ip
 
   set_env_var APP_PORT "$port" "$ENV_FILE"
-  set_env_var DATABASE_URL "postgresql://${pguser}:${pgpass}@postgres:5432/${pgdb}" "$ENV_FILE"
   set_env_var REDIS_URL "redis://redis:6379" "$ENV_FILE"
 
-  if [[ -n "${APP_DOMAIN:-}" ]]; then
-    set_env_var NEXT_PUBLIC_APP_URL "https://${APP_DOMAIN}" "$ENV_FILE"
-    set_env_var AUTH_URL "https://${APP_DOMAIN}" "$ENV_FILE"
-    ok "Public URL: https://${APP_DOMAIN} → proxy ke :${port}"
+  domain="${APP_DOMAIN:-$(get_env_var APP_DOMAIN "$ENV_FILE")}"
+  if [[ -n "$domain" && "$domain" != "your.domain.com" ]]; then
+    set_env_var APP_DOMAIN "$domain" "$ENV_FILE"
+    set_env_var NEXT_PUBLIC_APP_URL "https://${domain}" "$ENV_FILE"
+    set_env_var AUTH_URL "https://${domain}" "$ENV_FILE"
+    ok "Public URL: https://${domain}"
   else
     ip="$(detect_public_ip)"
     set_env_var NEXT_PUBLIC_APP_URL "http://${ip}:${port}" "$ENV_FILE"
     set_env_var AUTH_URL "http://${ip}:${port}" "$ENV_FILE"
-    warn "Tanpa domain — akses: http://${ip}:${port}"
+    warn "Tanpa domain — sementara: http://${ip}:${port}"
   fi
 
   load_dotenv
 }
 
-check_required_env() {
-  local db
-  db="$(get_env_var DATABASE_URL "$ENV_FILE")"
-  [[ -n "$db" && "$db" == *"@postgres:"* ]] || die "DATABASE_URL belum mengarah ke postgres Docker. Jalankan ulang ./deploy.sh"
+backup_env() {
+  mkdir -p "$ENV_BACKUP_DIR"
+  local stamp dest
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  dest="${ENV_BACKUP_DIR}/.env.${stamp}"
+  cp "$ENV_FILE" "$dest"
+  ok "Backup .env → ${dest}"
 }
 
 wait_app_http() {
   local port="$1" i
-  log "Menunggu app di :${port} (build pertama bisa 2–5 menit)..."
+  log "Menunggu app :${port}/api/health …"
   for i in $(seq 1 120); do
     if curl -fsS "http://127.0.0.1:${port}/api/health" >/dev/null 2>&1; then
       ok "App sehat di port ${port}"
@@ -296,36 +301,36 @@ wait_app_http() {
     fi
     sleep 3
   done
-  warn "Timeout health-check — cek: docker compose -f docker/docker-compose.yml logs --tail=100 app"
+  warn "Timeout — cek: ./scripts/logs.sh app"
   return 1
 }
 
-write_proxy_helpers() {
+write_nginx_site() {
   local port="$1"
+  local domain="$2"
   mkdir -p "$GENERATED_DIR"
 
-  cat > "${GENERATED_DIR}/PORT.txt" <<EOF
-LEDGERLY_HOST_PORT=${port}
-EOF
+  cat > "${GENERATED_DIR}/nginx-ledgerly.conf" <<EOF
+# Generated by Ledgerly install.sh — do not edit by hand (re-run install/update)
+map \$http_upgrade \$connection_upgrade {
+    default upgrade;
+    '' close;
+}
 
-  cat > "${GENERATED_DIR}/nginx-proxy-snippet.conf" <<EOF
-# Ledgerly — tempel ke Nginx yang sudah ada di VPS
-# Upstream: 127.0.0.1:${port}  (Socket.io wajib WebSocket)
-
-# Di http {} (sekali saja):
-# map \$http_upgrade \$connection_upgrade {
-#     default upgrade;
-#     '' close;
-# }
+upstream ledgerly_upstream {
+    server 127.0.0.1:${port};
+    keepalive 32;
+}
 
 server {
     listen 80;
-    server_name ${APP_DOMAIN:-ledgerly.YOUR-DOMAIN.com};
+    listen [::]:80;
+    server_name ${domain};
 
     client_max_body_size 20M;
 
     location / {
-        proxy_pass http://127.0.0.1:${port};
+        proxy_pass http://ledgerly_upstream;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection \$connection_upgrade;
@@ -338,7 +343,7 @@ server {
     }
 
     location /socket.io/ {
-        proxy_pass http://127.0.0.1:${port};
+        proxy_pass http://ledgerly_upstream;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection \$connection_upgrade;
@@ -352,30 +357,51 @@ server {
 }
 EOF
 
-  cat > "${GENERATED_DIR}/README.md" <<EOF
-# Ledgerly deploy
+  echo "LEDGERLY_HOST_PORT=${port}" > "${GENERATED_DIR}/PORT.txt"
+  ok "Nginx config → deploy/generated/nginx-ledgerly.conf"
+}
 
-- **Host port:** \`${port}\`
-- Postgres & Redis: internal Docker only (tidak publish ke host)
-- Akses IP: \`http://SERVER_IP:${port}\`
-- Nginx snippet: \`nginx-proxy-snippet.conf\`
+install_nginx_ssl() {
+  local port="$1"
+  local domain="$2"
 
-\`\`\`bash
-./redeploy.sh
-./scripts/status.sh
-./scripts/logs.sh app
-./scripts/stop.sh
-\`\`\`
-EOF
+  [[ -n "$domain" && "$domain" != "your.domain.com" ]] || {
+    warn "APP_DOMAIN kosong — skip Nginx/SSL. Akses via http://IP:${port}"
+    return 0
+  }
 
-  ok "Helper tertulis di deploy/generated/"
+  ensure_nginx_certbot
+  write_nginx_site "$port" "$domain"
+
+  sudo_cmd cp "${GENERATED_DIR}/nginx-ledgerly.conf" "$NGINX_SITE_AVAILABLE"
+  sudo_cmd ln -sf "$NGINX_SITE_AVAILABLE" "$NGINX_SITE_ENABLED"
+  # Remove default site if it steals port 80
+  if [[ -L /etc/nginx/sites-enabled/default ]]; then
+    sudo_cmd rm -f /etc/nginx/sites-enabled/default || true
+  fi
+
+  sudo_cmd nginx -t
+  sudo_cmd systemctl reload nginx
+  ok "Nginx proxy → 127.0.0.1:${port}"
+
+  log "Minta sertifikat Let's Encrypt untuk ${domain}…"
+  if sudo_cmd certbot --nginx -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --redirect; then
+    ok "HTTPS aktif: https://${domain}"
+  else
+    warn "Certbot gagal (DNS belum pointing?). Nginx HTTP tetap jalan. Ulangi: sudo certbot --nginx -d ${domain}"
+  fi
 }
 
 print_banner() {
   echo -e "${C_BOLD}"
   echo "╔════════════════════════════════════════════════════╗"
-  echo "║   Ledgerly — satu perintah → production            ║"
-  echo "║   Docker · auto port · aman di VPS shared          ║"
+  echo "║   Ledgerly — Neon DB · Docker · Nginx/SSL          ║"
   echo "╚════════════════════════════════════════════════════╝"
   echo -e "${C_RESET}"
+}
+
+stack_up_build() {
+  log "Build & start containers (app + redis + workers)…"
+  compose up -d --build --remove-orphans
+  ok "Stack starting"
 }

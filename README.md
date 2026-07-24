@@ -18,7 +18,7 @@ Self-hosted personal finance assistant. Catat pengeluaran lewat **chat** (Telegr
 | **Analytics** | Tren pengeluaran / pemasukan |
 | **AI insights** | Analisis dengan API key milikmu (Gemini atau OpenRouter) — key dienkripsi |
 | **Akses aman** | Tidak ada register publik. Tiap browser minta izin owner via bot (kode + fingerprint + IP) |
-| **Self-host** | Docker Compose: 1 port publik, Postgres & Redis internal — aman di VPS yang sudah ramai |
+| **Self-host** | Docker + Nginx/SSL · data di **Neon PostgreSQL** (bukan DB di dalam VPS) · Redis internal |
 
 ---
 
@@ -96,25 +96,26 @@ Buka http://localhost:3000 — panduan lengkap: **[docs/SETUP.md](docs/SETUP.md)
 ### Deploy self-host di VPS (produksi)
 
 ```bash
-git clone https://github.com/AFR-projection/Finance-Dashboard.git ledgerly
-cd ledgerly
-cp .env.example .env
-chmod +x deploy.sh redeploy.sh scripts/*.sh
-./deploy.sh
+git clone https://github.com/AFR-projection/Finance-Dashboard.git /opt/ledgerly
+cd /opt/ledgerly
+cp .env.example .env && nano .env   # WAJIB: DATABASE_URL Neon
+chmod +x install.sh deploy.sh update.sh
+./install.sh
 ```
 
-Tutorial lengkap (firewall, domain, Nginx, SSL, troubleshooting):  
-**[SELF_HOST.md](./SELF_HOST.md)**
+Update versi nanti: `cd /opt/ledgerly && ./update.sh`
+
+Panduan lengkap: **[DEPLOY.md](./DEPLOY.md)** · detail tambahan: **[SELF_HOST.md](./SELF_HOST.md)**
 
 ---
 
 ## Stack
 
 - **Web:** Next.js + TypeScript + Tailwind + Shadcn UI + Socket.io  
-- **Data:** Prisma + PostgreSQL (Docker di VPS / Neon di local)  
+- **Data:** Prisma + **Neon PostgreSQL** (produksi) / Neon atau Postgres lokal (dev)  
 - **AI:** Gemini / OpenRouter (key user, dienkripsi at-rest)  
 - **Messaging:** Grammy (Telegram) + Baileys (WhatsApp)  
-- **Deploy:** Docker Compose + `./deploy.sh` (auto port, auto secrets)
+- **Deploy:** Docker Compose + `install.sh` / `deploy.sh` / `update.sh` + Nginx SSL
 
 ```
 WhatsApp / Telegram / Web
@@ -123,7 +124,7 @@ WhatsApp / Telegram / Web
           ↓
     Finance Engine
           ↓
-      PostgreSQL
+   Neon PostgreSQL
 ```
 
 ---
@@ -132,9 +133,9 @@ WhatsApp / Telegram / Web
 
 | Dokumen | Isi |
 |---------|-----|
-| **[SELF_HOST.md](./SELF_HOST.md)** | Deploy VPS self-host (produksi) |
+| **[DEPLOY.md](./DEPLOY.md)** | Deploy VPS production (utama) |
+| **[SELF_HOST.md](./SELF_HOST.md)** | Catatan self-host tambahan |
 | **[docs/SETUP.md](docs/SETUP.md)** | Setup local / development |
-| **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** | Ringkasan perintah deploy |
 | **[docs/API.md](docs/API.md)** | API reference |
 | **[docs/TESTING.md](docs/TESTING.md)** | Testing |
 

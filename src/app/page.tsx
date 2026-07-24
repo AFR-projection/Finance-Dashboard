@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { getAppConfig } from "@/lib/app-config";
 import { getAccessSession } from "@/lib/access-session";
 
+export const dynamic = "force-dynamic";
+
 export default async function HomePage() {
   const cfg = await getAppConfig();
   if (!cfg.isReady) redirect("/setup");

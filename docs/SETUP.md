@@ -60,10 +60,10 @@ npm run worker:whatsapp
 
 ---
 
-## VPS (Docker / self-host)
+## VPS (Docker / self-host + Neon)
 
-Panduan produksi lengkap: **[SELF_HOST.md](../SELF_HOST.md)**  
-Ringkas: `cp .env.example .env && ./deploy.sh`
+Panduan produksi: **[DEPLOY.md](../DEPLOY.md)**  
+`DATABASE_URL` wajib Neon → lalu `./install.sh`
 
 ## Prerequisites
 
