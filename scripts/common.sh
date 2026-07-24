@@ -2,7 +2,10 @@
 # Shared helpers — Ledgerly (Neon + Docker + Nginx)
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Caller (install/deploy/update) may already set ROOT_DIR after cd ke project root.
+# Fallback: parent of scripts/
+_LEDGERLY_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="${ROOT_DIR:-$(cd "${_LEDGERLY_SCRIPTS_DIR}/.." && pwd)}"
 COMPOSE_FILE="${ROOT_DIR}/docker/docker-compose.yml"
 ENV_FILE="${ROOT_DIR}/.env"
 ENV_EXAMPLE="${ROOT_DIR}/.env.example"
@@ -51,12 +54,23 @@ docker_bin() {
 compose() {
   local db
   db="$(docker_bin)"
+  # Pastikan CWD = project root + path absolut (hindari resolve ke /opt/docker)
+  cd "$ROOT_DIR" || die "Tidak bisa cd ke ROOT_DIR=$ROOT_DIR"
+  [[ -f "$COMPOSE_FILE" ]] || die "Compose file tidak ditemukan: $COMPOSE_FILE"
   [[ -f "$ENV_FILE" ]] || die ".env tidak ada — cp .env.example .env lalu isi DATABASE_URL Neon"
   if $db compose version >/dev/null 2>&1; then
-    $db compose -f "$COMPOSE_FILE" --project-directory "$ROOT_DIR" --env-file "$ENV_FILE" "$@"
+    $db compose \
+      -f "$COMPOSE_FILE" \
+      --project-directory "$ROOT_DIR" \
+      --env-file "$ENV_FILE" \
+      "$@"
   elif command -v docker-compose >/dev/null 2>&1; then
     # shellcheck disable=SC2086
-    $db-compose -f "$COMPOSE_FILE" --project-directory "$ROOT_DIR" "$@"
+    $db-compose \
+      -f "$COMPOSE_FILE" \
+      --project-directory "$ROOT_DIR" \
+      --env-file "$ENV_FILE" \
+      "$@"
   else
     die "Docker Compose plugin tidak ditemukan"
   fi

@@ -1,8 +1,8 @@
 # Ledgerly — Docker Compose (Neon external + Redis internal)
 #
-# Internet → Nginx (:443) → app (APP_PORT host)
-#                        ↘ redis (internal)
-# Neon PostgreSQL (external — DATABASE_URL di .env)
+# Paths relatif ke PROJECT ROOT (/opt/ledgerly), bukan ke folder docker/.
+# install.sh / deploy.sh memanggil:
+#   docker compose -f "$ROOT/docker/docker-compose.yml" --project-directory "$ROOT" --env-file "$ROOT/.env"
 #
 # Install: ./install.sh
 # Rebuild: ./deploy.sh
@@ -26,7 +26,8 @@ services:
 
   app:
     build:
-      context: ..
+      # IMPORTANT: context = project root (bukan "..") supaya tidak resolve ke /opt
+      context: .
       dockerfile: docker/Dockerfile
       args:
         # Dummy cukup untuk build; runtime pakai env_file DATABASE_URL (Neon)
@@ -35,7 +36,7 @@ services:
     ports:
       - "${APP_PORT:-3047}:3000"
     env_file:
-      - ../.env
+      - .env
     environment:
       NODE_ENV: production
       HOSTNAME: "0.0.0.0"
@@ -55,17 +56,16 @@ services:
       timeout: 10s
       retries: 20
       start_period: 120s
-    # entrypoint: prisma db push → server.ts
 
   telegram-worker:
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile
       args:
         DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build?schema=public
     restart: unless-stopped
     env_file:
-      - ../.env
+      - .env
     environment:
       REDIS_URL: redis://redis:6379
       NEXT_PUBLIC_APP_URL: http://app:3000
@@ -80,13 +80,13 @@ services:
 
   whatsapp-worker:
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile
       args:
         DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build?schema=public
     restart: unless-stopped
     env_file:
-      - ../.env
+      - .env
     environment:
       REDIS_URL: redis://redis:6379
       NEXT_PUBLIC_APP_URL: http://app:3000

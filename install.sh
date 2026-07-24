@@ -14,14 +14,19 @@
 #
 set -euo pipefail
 
+# Selalu kerja dari root project (folder tempat install.sh berada)
+cd "$(dirname "$0")" || exit 1
+ROOT_DIR="$(pwd)"
+
 export TOTAL_STEPS=9
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/common.sh"
+cd "$ROOT_DIR" || exit 1
 
 print_banner
 echo -e "${C_DIM}Fresh install · Neon PostgreSQL · Redis Docker · Nginx/SSL${C_RESET}"
-cd "$ROOT_DIR"
+log "Working directory: ${ROOT_DIR}"
+log "Compose file: ${COMPOSE_FILE}"
 
 PORT_OVERRIDE="${APP_PORT:-}"
 
@@ -38,7 +43,6 @@ CHOSEN_PORT="$(pick_free_port "$PORT_OVERRIDE")"
 ok "Port: ${C_BOLD}${CHOSEN_PORT}${C_RESET}"
 
 step "Set URL runtime..."
-# Prefer CLI APP_DOMAIN over file
 if [[ -n "${APP_DOMAIN:-}" ]]; then
   set_env_var APP_DOMAIN "$APP_DOMAIN" "$ENV_FILE"
 fi

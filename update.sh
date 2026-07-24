@@ -8,10 +8,13 @@
 #
 set -euo pipefail
 
+cd "$(dirname "$0")" || exit 1
+ROOT_DIR="$(pwd)"
+
 export TOTAL_STEPS=6
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/common.sh"
+cd "$ROOT_DIR" || exit 1
 
 DO_PULL=1
 for arg in "$@"; do
@@ -23,7 +26,8 @@ done
 
 print_banner
 echo -e "${C_DIM}Safe update · git pull · backup .env · Neon schema sync${C_RESET}"
-cd "$ROOT_DIR"
+log "Working directory: ${ROOT_DIR}"
+log "Compose file: ${COMPOSE_FILE}"
 
 [[ -f "$ENV_FILE" ]] || die "Belum ada .env — jalankan ./install.sh dulu."
 
@@ -32,13 +36,11 @@ backup_env
 
 step "Pull kode..."
 if [[ "$DO_PULL" -eq 1 && -d .git ]]; then
-  # Jaga .env tidak tertimpa
   git pull --ff-only && ok "git pull OK" || warn "git pull gagal — lanjut kode lokal"
 else
   ok "Skip pull"
 fi
 
-# Pastikan .env masih ada setelah pull
 [[ -f "$ENV_FILE" ]] || die ".env hilang setelah pull — restore dari .env-backups/"
 
 step "Validasi Neon + secrets..."
@@ -55,14 +57,12 @@ apply_runtime_urls "$PORT"
 
 step "Rebuild & restart..."
 stack_up_build
-# Schema sync: docker/entrypoint.sh menjalankan prisma db push ke Neon
 ok "Schema sync via entrypoint (prisma db push → Neon)"
 
 step "Health-check..."
 wait_app_http "$PORT" || true
 DOMAIN="$(get_env_var APP_DOMAIN "$ENV_FILE")"
 write_nginx_site "$PORT" "${DOMAIN:-_}"
-# Refresh nginx upstream port if site already installed
 if [[ -n "$DOMAIN" && -f "$NGINX_SITE_AVAILABLE" ]]; then
   sudo_cmd cp "${GENERATED_DIR}/nginx-ledgerly.conf" "$NGINX_SITE_AVAILABLE" 2>/dev/null || true
   sudo_cmd nginx -t 2>/dev/null && sudo_cmd systemctl reload nginx 2>/dev/null || true

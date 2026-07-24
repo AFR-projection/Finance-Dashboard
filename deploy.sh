@@ -8,14 +8,18 @@
 #
 set -euo pipefail
 
+cd "$(dirname "$0")" || exit 1
+ROOT_DIR="$(pwd)"
+
 export TOTAL_STEPS=5
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/common.sh"
+cd "$ROOT_DIR" || exit 1
 
 print_banner
 echo -e "${C_DIM}Rebuild stack · no git pull · keep .env${C_RESET}"
-cd "$ROOT_DIR"
+log "Working directory: ${ROOT_DIR}"
+log "Compose file: ${COMPOSE_FILE}"
 
 PORT_OVERRIDE="${APP_PORT:-}"
 
