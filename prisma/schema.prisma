@@ -291,3 +291,18 @@ model TrustedDevice {
   @@index([userId])
   @@map("trusted_devices")
 }
+
+/// Single-tenant owner/bot config (satu instance = satu pemilik)
+model AppConfig {
+  id                   String   @id @default("singleton")
+  ownerUserId          String?  @unique @map("owner_user_id")
+  ownerName            String?  @map("owner_name")
+  telegramBotToken     String?  @map("telegram_bot_token") @db.Text
+  telegramOwnerChatId  String?  @map("telegram_owner_chat_id")
+  whatsappOwnerPhone   String?  @map("whatsapp_owner_phone")
+  setupCompleted       Boolean  @default(false) @map("setup_completed")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@map("app_config")
+}

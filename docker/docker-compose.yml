@@ -1,10 +1,9 @@
 # Ledgerly — Docker Compose (aman di VPS yang sudah ramai)
 #
-# Hanya publish 1 port ke host: APP_PORT (default 3001)
-# Postgres & Redis INTERNAL saja → tidak tabrakan dengan project lain.
+# Hanya publish 1 port ke host: APP_PORT (dipilih ./deploy.sh)
+# Postgres & Redis INTERNAL → tidak tabrakan dengan project lain.
 #
-# Start:  docker compose -f docker/docker-compose.yml up -d --build
-# Atau:   ./deploy.sh
+# Start: ./deploy.sh
 
 name: ledgerly
 
@@ -18,7 +17,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-ledgerly}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # TIDAK di-publish ke host (hindari konflik 5432)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ledgerly} -d ${POSTGRES_DB:-ledgerly}"]
       interval: 5s
@@ -32,7 +30,6 @@ services:
     restart: unless-stopped
     volumes:
       - redis_data:/data
-    # TIDAK di-publish ke host (hindari konflik 6379)
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -47,8 +44,7 @@ services:
       dockerfile: docker/Dockerfile
     restart: unless-stopped
     ports:
-      # Satu-satunya port yang keluar ke VPS host
-      - "${APP_PORT:-3001}:3000"
+      - "${APP_PORT:-3047}:3000"
     env_file:
       - ../.env
     environment:
@@ -57,11 +53,13 @@ services:
       PORT: "3000"
       DATABASE_URL: postgresql://${POSTGRES_USER:-ledgerly}:${POSTGRES_PASSWORD:-ledgerly_secret_change_me}@postgres:5432/${POSTGRES_DB:-ledgerly}
       REDIS_URL: redis://redis:6379
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://127.0.0.1:3001}
-      AUTH_URL: ${AUTH_URL:-http://127.0.0.1:3001}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://127.0.0.1:3047}
+      AUTH_URL: ${AUTH_URL:-http://127.0.0.1:3047}
       WHATSAPP_WORKER_SECRET: ${WHATSAPP_WORKER_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       AUTH_SECRET: ${AUTH_SECRET}
+      TELEGRAM_EMBEDDED: "0"
+      DOCKER: "1"
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,11 +68,11 @@ services:
     networks:
       - ledgerly_net
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 15s
       timeout: 10s
       retries: 20
-      start_period: 60s
+      start_period: 90s
     command: sh -c "npx prisma db push && npx tsx server.ts"
 
   telegram-worker:
@@ -90,6 +88,7 @@ services:
       NEXT_PUBLIC_APP_URL: http://app:3000
       WHATSAPP_WORKER_SECRET: ${WHATSAPP_WORKER_SECRET}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      DOCKER: "1"
     depends_on:
       app:
         condition: service_healthy
@@ -111,6 +110,7 @@ services:
       WHATSAPP_WORKER_SECRET: ${WHATSAPP_WORKER_SECRET}
       WHATSAPP_AUTH_DIR: /data/wa-auth
       WHATSAPP_OWNER_USER_ID: ${WHATSAPP_OWNER_USER_ID:-}
+      DOCKER: "1"
     volumes:
       - wa_auth:/data/wa-auth
     depends_on:

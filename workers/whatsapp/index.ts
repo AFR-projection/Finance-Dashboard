@@ -69,7 +69,7 @@ async function processMessage(externalId: string, text: string): Promise<string>
   const authMatch = text.match(/^(approve|reject)\s+([a-zA-Z0-9]+)$/i);
   if (authMatch) {
     const action = authMatch[1].toLowerCase();
-    const res = await fetch(`${APP_URL}/api/auth/login-confirm`, {
+    const res = await fetch(`${APP_URL}/api/access/confirm`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -78,7 +78,7 @@ async function processMessage(externalId: string, text: string): Promise<string>
       body: JSON.stringify({ action, code: authMatch[2] }),
     });
     const json = (await res.json()) as { data?: { text?: string }; error?: string };
-    return json.data?.text || json.error || "Gagal konfirmasi login.";
+    return json.data?.text || json.error || "Gagal konfirmasi akses.";
   }
 
   const res = await fetch(`${APP_URL}/api/channels/ingress`, {

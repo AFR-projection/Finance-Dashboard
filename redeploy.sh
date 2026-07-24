@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Ledgerly — Redeploy (Docker)
+# Ledgerly — upgrade tanpa ganti port / volume
 #   ./redeploy.sh
 #   ./redeploy.sh --no-pull
 #
@@ -20,13 +20,14 @@ for arg in "$@"; do
 done
 
 print_banner
-echo -e "${C_DIM}Docker upgrade · port & volume tetap aman${C_RESET}"
+echo -e "${C_DIM}Upgrade stack · port & volume tetap${C_RESET}"
 cd "$ROOT_DIR"
 
-[[ -f "$ENV_FILE" ]] || die "Belum deploy. Jalankan ./deploy.sh dulu."
+[[ -f "$ENV_FILE" ]] || die "Belum ada .env — jalankan ./deploy.sh dulu."
 
 PORT="$(get_env_var APP_PORT "$ENV_FILE")"
-PORT="${PORT:-3001}"
+PORT="${PORT:-}"
+[[ -n "$PORT" ]] || die "APP_PORT kosong di .env — jalankan ./deploy.sh dulu."
 
 step "Pull kode..."
 if [[ "$DO_PULL" -eq 1 && -d .git ]]; then
@@ -35,34 +36,19 @@ else
   ok "skip pull"
 fi
 
-step "Load env..."
-load_dotenv
-# Keep docker-internal DB/redis URLs
-pguser="$(get_env_var POSTGRES_USER "$ENV_FILE")"; pguser="${pguser:-ledgerly}"
-pgpass="$(get_env_var POSTGRES_PASSWORD "$ENV_FILE")"
-pgdb="$(get_env_var POSTGRES_DB "$ENV_FILE")"; pgdb="${pgdb:-ledgerly}"
-set_env_var DATABASE_URL "postgresql://${pguser}:${pgpass}@postgres:5432/${pgdb}" "$ENV_FILE"
-set_env_var REDIS_URL "redis://redis:6379" "$ENV_FILE"
-load_dotenv
+step "Refresh Docker URLs..."
+apply_docker_urls "$PORT"
 
-step "Rebuild & restart containers..."
+step "Rebuild & restart..."
 compose up -d --build --remove-orphans
-ok "Stack di-upgrade (volume postgres/redis/wa_auth tidak dihapus)"
+ok "Stack di-upgrade (volume postgres/redis/wa_auth aman)"
 
-step "Health-check port ${PORT}..."
-for i in $(seq 1 60); do
-  if curl -fsS "http://127.0.0.1:${PORT}/login" >/dev/null 2>&1; then
-    ok "App OK di :${PORT}"
-    break
-  fi
-  [[ "$i" -eq 60 ]] && warn "Belum merespons — cek logs app"
-  sleep 2
-done
+step "Health-check :${PORT}..."
+wait_app_http "$PORT" || true
+write_proxy_helpers "$PORT"
 
 step "Selesai"
 compose ps || true
 echo
-ok "Redeploy selesai"
-echo "  Port tetap   : ${PORT}"
-echo "  Proxy snippet: deploy/generated/nginx-proxy-snippet.conf"
-echo "  WA logs      : docker compose -f docker/docker-compose.yml logs -f whatsapp-worker"
+ok "Redeploy selesai — port tetap ${PORT}"
+echo "  URL : $(get_env_var NEXT_PUBLIC_APP_URL "$ENV_FILE")"

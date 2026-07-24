@@ -13,17 +13,29 @@ Personal AI finance assistant with WhatsApp (Baileys), Telegram, and a premium w
 - Grammy (Telegram) + Baileys (WhatsApp)
 - Docker Compose for VPS deployment
 
+## Preview lokal (tanpa Docker)
+
+```bash
+npm run setup:local
+# edit .env → isi DATABASE_URL dari Neon (gratis)
+npx prisma db push
+npm run db:seed
+npm run dev
+```
+
+Buka http://localhost:3000 — detail: **[docs/SETUP.md](docs/SETUP.md)**.
+
 ## Deploy VPS (Docker — aman bareng project lain)
 
 ```bash
+git clone <REPO> ledgerly && cd ledgerly
+cp .env.example .env
 chmod +x deploy.sh redeploy.sh scripts/*.sh
 ./deploy.sh
 ```
 
-Default port host: **3001** (auto pilih 3002/5000/8082/9000 jika sibuk).  
-Tidak memakai 22/80/443/3000/8080/8081. Postgres/Redis internal.
-
-Setelah selesai lihat: `deploy/generated/PORT.txt` + snippet Nginx.
+Satu perintah: install Docker (jika perlu), generate secrets, **auto-pilih port yang belum dipakai**, build & up.  
+Postgres/Redis internal — tidak bentrok project lain. Lihat `deploy/generated/PORT.txt`.
 
 Detail: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 

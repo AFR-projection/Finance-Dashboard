@@ -1,4 +1,5 @@
-import geoip from "geoip-lite";
+import { createRequire } from "module";
+import { join } from "path";
 
 export type GeoInfo = {
   country: string | null;
@@ -7,23 +8,53 @@ export type GeoInfo = {
   lon: number | null;
 };
 
-export function lookupGeo(ip: string): GeoInfo {
-  const clean = normalizeIp(ip);
-  if (!clean || isPrivateIp(clean)) {
-    return { country: null, city: null, lat: null, lon: null };
+type GeoIpLite = {
+  lookup: (ip: string) => {
+    country?: string;
+    city?: string;
+    ll?: [number, number];
+  } | null;
+};
+
+let geoip: GeoIpLite | null | undefined;
+
+function loadGeoIp(): GeoIpLite | null {
+  if (geoip !== undefined) return geoip;
+  try {
+    // Load from real node_modules path — Next/Turbopack breaks geoip-lite's __dirname
+    const require = createRequire(join(process.cwd(), "package.json"));
+    geoip = require("geoip-lite") as GeoIpLite;
+  } catch (err) {
+    console.warn("geoip-lite unavailable, geo lookup disabled:", err);
+    geoip = null;
   }
-  const g = geoip.lookup(clean);
-  if (!g) return { country: null, city: null, lat: null, lon: null };
-  return {
-    country: g.country ?? null,
-    city: g.city ?? null,
-    lat: g.ll?.[0] ?? null,
-    lon: g.ll?.[1] ?? null,
-  };
+  return geoip;
+}
+
+export function lookupGeo(ip: string): GeoInfo {
+  const empty: GeoInfo = { country: null, city: null, lat: null, lon: null };
+  try {
+    const clean = normalizeIp(ip);
+    if (!clean || isPrivateIp(clean)) return empty;
+
+    const lib = loadGeoIp();
+    if (!lib) return empty;
+
+    const g = lib.lookup(clean);
+    if (!g) return empty;
+    return {
+      country: g.country ?? null,
+      city: g.city ?? null,
+      lat: g.ll?.[0] ?? null,
+      lon: g.ll?.[1] ?? null,
+    };
+  } catch (err) {
+    console.warn("lookupGeo failed:", err);
+    return empty;
+  }
 }
 
 export function normalizeIp(ip: string): string {
-  // x-forwarded-for may be "client, proxy"
   const first = ip.split(",")[0]?.trim() || ip;
   return first.replace(/^::ffff:/, "");
 }
@@ -44,7 +75,6 @@ export function isPrivateIp(ip: string): boolean {
   );
 }
 
-/** Haversine distance in km */
 export function distanceKm(
   a: { lat: number; lon: number },
   b: { lat: number; lon: number },
@@ -60,9 +90,6 @@ export function distanceKm(
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-/**
- * Drastic IP/geo change = different country OR distance > threshold km.
- */
 export function isDrasticGeoChange(
   prev: GeoInfo & { ip?: string | null },
   next: GeoInfo & { ip?: string | null },
@@ -75,14 +102,12 @@ export function isDrasticGeoChange(
     next.lat != null &&
     next.lon != null
   ) {
-    return distanceKm(
-      { lat: prev.lat, lon: prev.lon },
-      { lat: next.lat, lon: next.lon },
-    ) > thresholdKm;
-  }
-  // No geo data: treat different public IPs as mild risk (not drastic alone)
-  if (prev.ip && next.ip && prev.ip !== next.ip && !isPrivateIp(next.ip)) {
-    return false;
+    return (
+      distanceKm(
+        { lat: prev.lat, lon: prev.lon },
+        { lat: next.lat, lon: next.lon },
+      ) > thresholdKm
+    );
   }
   return false;
 }

@@ -1,54 +1,58 @@
-# Deploy Ledgerly di VPS yang sudah ada Docker project lain
+# Deploy Ledgerly di VPS (Docker)
 
-## Port
-
-| Port | Status |
-|------|--------|
-| 22, 80, 443, 3000, 8080, 8081 | **Tidak dipakai** (sudah ada project lain) |
-| **3001** (default) | Ledgerly app |
-| 3002 / 5000 / 8082 / 9000 | Cadangan jika 3001 sibuk |
-| 5432 / 6379 | **Tidak di-publish** (Postgres/Redis internal Docker) |
-
-## Satu perintah
+Alur yang diinginkan:
 
 ```bash
 git clone <REPO> ledgerly && cd ledgerly
+cp .env.example .env          # opsional: isi TELEGRAM_BOT_TOKEN
 chmod +x deploy.sh redeploy.sh scripts/*.sh
-./deploy.sh
+./deploy.sh                   # selesai — web produksi
 ```
 
-Dengan domain (setelah reverse proxy siap):
+Dengan domain (setelah Nginx/Caddy siap):
 
 ```bash
 APP_DOMAIN=finance.example.com ./deploy.sh
 ```
 
+## Apa yang dilakukan `./deploy.sh`
+
+1. Install Docker (Ubuntu/Debian) jika belum ada  
+2. Generate secrets yang masih placeholder  
+3. **Auto-pilih port host yang belum dipakai** (hindari 22, 80, 443, 3000, 8080, 8081, …)  
+4. Postgres + Redis **internal** Docker (tidak publish — aman bareng project lain)  
+5. Build & start: `app` + `telegram-worker` + `whatsapp-worker`  
+6. Tulis `deploy/generated/` (PORT + snippet Nginx)
+
+Port favorit (jika bebas): `3047`, `3184`, `4093`, `5183`, `6291`, `7341`, …  
+Kalau semua sibuk, scan range `3100–3199`, `5100–5199`, dll.
+
 Paksa port:
 
 ```bash
-APP_PORT=3002 ./deploy.sh
+APP_PORT=7341 ./deploy.sh
 ```
 
 ## Setelah deploy
 
-Script menulis:
-
-- `deploy/generated/PORT.txt` → port yang dipakai
-- `deploy/generated/nginx-proxy-snippet.conf` → tempel ke Nginx existing
-- `deploy/generated/README.md`
-
-Contoh: jika port **3001**, arahkan domain ke `http://127.0.0.1:3001` (wajib WebSocket untuk `/socket.io/`).
+- Buka URL yang dicetak script → `/setup` (owner + bot)  
+- File penting:
+  - `deploy/generated/PORT.txt`
+  - `deploy/generated/nginx-proxy-snippet.conf` → proxy domain ke `127.0.0.1:<PORT>` (wajib WebSocket `/socket.io/`)
 
 ## Upgrade
 
 ```bash
-./redeploy.sh
+./redeploy.sh                 # port & volume tetap
+./redeploy.sh --no-pull
 ```
 
-## Logs
+## Operasional
 
 ```bash
-docker compose -f docker/docker-compose.yml ps
-docker compose -f docker/docker-compose.yml logs -f app
-docker compose -f docker/docker-compose.yml logs -f whatsapp-worker
+./scripts/status.sh
+./scripts/doctor.sh
+./scripts/logs.sh app
+./scripts/logs.sh whatsapp-worker   # QR WhatsApp
+./scripts/stop.sh                   # stop containers (data aman)
 ```

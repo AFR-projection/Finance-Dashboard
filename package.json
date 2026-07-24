@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "dev:next": "next dev",
+    "setup:local": "npm install --legacy-peer-deps && node -e \"const fs=require('fs'); if(!fs.existsSync('.env')){fs.copyFileSync('.env.local.example','.env'); console.log('Created .env from .env.local.example')} else {console.log('.env exists')}\"",
     "build": "prisma generate && next build",
     "start": "NODE_ENV=production tsx server.ts",
     "start:next": "next start",
@@ -46,6 +47,7 @@
     "geoip-lite": "^2.0.3",
     "grammy": "^1.45.1",
     "ioredis": "^5.11.1",
+    "jose": "^6.2.4",
     "lucide-react": "^1.26.0",
     "nanoid": "^6.0.0",
     "next": "16.2.11",

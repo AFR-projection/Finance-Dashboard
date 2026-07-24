@@ -1,14 +1,23 @@
-import { NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { FinanceEngineError } from "@/finance-engine";
 import { rateLimit } from "@/lib/rate-limit";
+import { getAccessSession } from "@/lib/access-session";
+import { getAppConfig, requireOwnerUserId } from "@/lib/app-config";
+import { NextResponse } from "next/server";
 
 export async function requireUser() {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const cfg = await getAppConfig();
+  if (!cfg.isReady) {
+    throw new FinanceEngineError("Setup belum selesai", "SETUP_REQUIRED", 503);
+  }
+  const session = await getAccessSession();
+  if (!session?.userId) {
     throw new FinanceEngineError("Unauthorized", "UNAUTHORIZED", 401);
   }
-  return session.user;
+  const ownerId = await requireOwnerUserId();
+  if (session.userId !== ownerId) {
+    throw new FinanceEngineError("Unauthorized", "UNAUTHORIZED", 401);
+  }
+  return { id: session.userId };
 }
 
 export function jsonOk<T>(data: T, init?: ResponseInit) {
@@ -42,7 +51,7 @@ export async function withApiGuard(
     if (!rl.ok) {
       return NextResponse.json(
         { ok: false, error: { code: "RATE_LIMITED", message: "Too many requests" } },
-        { status: 429, headers: { "Retry-After": String(Math.ceil((rl.resetAt - Date.now()) / 1000)) } },
+        { status: 429 },
       );
     }
     return await handler(user.id);

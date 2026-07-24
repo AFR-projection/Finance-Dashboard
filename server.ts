@@ -1,8 +1,11 @@
 import { createServer } from "http";
 import { parse } from "url";
+import { loadEnvConfig } from "@next/env";
 import next from "next";
 import { Server as SocketIOServer } from "socket.io";
 import { setSocketServer } from "./src/lib/socket-server";
+
+loadEnvConfig(process.cwd());
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOSTNAME || "0.0.0.0";
@@ -50,5 +53,9 @@ app.prepare().then(() => {
 
   httpServer.listen(port, hostname, () => {
     console.log(`> Ledgerly ready on http://${hostname}:${port} (Socket.io enabled)`);
+    // Local-friendly: handle /approve without separate worker process
+    import("./src/messaging/start-telegram-bot")
+      .then((m) => m.startEmbeddedTelegramBot())
+      .catch((err) => console.warn("[telegram] embed skip:", err));
   });
 });

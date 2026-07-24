@@ -52,7 +52,7 @@ if (!token) {
   }
 
   async function confirmLogin(action: "approve" | "reject", code: string) {
-    const res = await fetch(`${APP_URL}/api/auth/login-confirm`, {
+    const res = await fetch(`${APP_URL}/api/access/confirm`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -61,7 +61,7 @@ if (!token) {
       body: JSON.stringify({ action, code }),
     });
     const json = (await res.json()) as { data?: { text?: string }; error?: string };
-    return json.data?.text || json.error || "Gagal memproses konfirmasi login.";
+    return json.data?.text || json.error || "Gagal memproses konfirmasi akses.";
   }
 
   bot.command("start", async (ctx) => {

@@ -1,21 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import {
-  LayoutDashboard,
-  ArrowLeftRight,
-  PieChart,
-  Sparkles,
-  Wallet,
-  Settings,
-  Share2,
-  MessageSquare,
-  Bot,
-  Target,
-  LogOut,
-} from "lucide-react";
-import { signOut } from "next-auth/react";
+import { usePathname, useRouter } from "next/navigation";
+import { LayoutDashboard, ArrowLeftRight, PieChart, Settings, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -23,17 +10,18 @@ const nav = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/dashboard/transactions", label: "Transactions", icon: ArrowLeftRight },
   { href: "/dashboard/analytics", label: "Analytics", icon: PieChart },
-  { href: "/dashboard/insights", label: "AI Insights", icon: Sparkles },
-  { href: "/dashboard/budgets", label: "Budgets", icon: Wallet },
-  { href: "/dashboard/goals", label: "Goals", icon: Target },
-  { href: "/dashboard/agent", label: "AI Agent", icon: Bot },
-  { href: "/channels", label: "Channels", icon: MessageSquare },
-  { href: "/dashboard/share", label: "Share", icon: Share2 },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function logout() {
+    await fetch("/api/access/logout", { method: "POST" });
+    router.push("/access");
+    router.refresh();
+  }
 
   return (
     <aside className="flex h-full w-64 flex-col border-r border-border/60 bg-[oklch(0.985_0.01_165)] px-4 py-6">
@@ -41,7 +29,7 @@ export function AppSidebar() {
         <div className="font-[family-name:var(--font-display)] text-2xl tracking-tight text-[oklch(0.28_0.06_165)]">
           Ledgerly
         </div>
-        <p className="text-xs text-muted-foreground">AI Finance Agent</p>
+        <p className="text-xs text-muted-foreground">Personal finance · self-hosted</p>
       </Link>
       <nav className="flex flex-1 flex-col gap-1">
         {nav.map((item) => {
@@ -69,10 +57,10 @@ export function AppSidebar() {
       <Button
         variant="ghost"
         className="mt-4 justify-start gap-3 text-foreground/70"
-        onClick={() => signOut({ callbackUrl: "/login" })}
+        onClick={() => void logout()}
       >
         <LogOut className="size-4" />
-        Keluar
+        Tutup sesi
       </Button>
     </aside>
   );
