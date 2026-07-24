@@ -60,9 +60,10 @@ npm run worker:whatsapp
 
 ---
 
-## VPS (Docker)
+## VPS (Docker / self-host)
 
-Lihat [DEPLOYMENT.md](./DEPLOYMENT.md) — `cp .env.example .env && ./deploy.sh` (auto-pilih port bebas).
+Panduan produksi lengkap: **[SELF_HOST.md](../SELF_HOST.md)**  
+Ringkas: `cp .env.example .env && ./deploy.sh`
 
 ## Prerequisites
 
