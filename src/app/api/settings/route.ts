@@ -89,7 +89,7 @@ export async function PUT(request: Request) {
 
     const parsed = aiSettingsSchema.parse(body);
     const data: {
-      aiProvider: "GEMINI" | "OPENROUTER";
+      aiProvider: "OPENROUTER";
       aiModel: string;
       currency?: string;
       timezone?: string;

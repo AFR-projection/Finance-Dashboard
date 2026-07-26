@@ -16,7 +16,7 @@ Self-hosted personal finance assistant. Catat pengeluaran lewat **chat** (Telegr
 | **Dashboard** | Overview saldo, cashflow, health score |
 | **Transactions** | Riwayat, filter, edit transaksi |
 | **Analytics** | Tren pengeluaran / pemasukan |
-| **AI insights** | Analisis dengan API key milikmu (Gemini atau OpenRouter) — key dienkripsi |
+| **AI insights** | Analisis dengan API key OpenRouter milikmu — bebas pilih model, key dienkripsi |
 | **Akses aman** | Tidak ada register publik. Tiap browser minta izin owner via bot (kode + fingerprint + IP) |
 | **Self-host** | Docker + Nginx/SSL · data di **Neon PostgreSQL** (bukan DB di dalam VPS) · Redis internal |
 
@@ -67,7 +67,7 @@ Tolak: `/reject KODE`
 
 - **Dari chat:** `beli kopi 25rb`, `transfer masuk 500000`, dll.  
 - **Dari web:** Transactions / agent di dashboard  
-- **Settings:** tempel API key Gemini atau OpenRouter untuk insight AI  
+- **Settings:** tempel API key OpenRouter dan pilih model untuk insight AI  
 
 ### 4) Upgrade & operasional (VPS)
 
@@ -113,7 +113,7 @@ Panduan lengkap: **[DEPLOY.md](./DEPLOY.md)** · detail tambahan: **[SELF_HOST.m
 
 - **Web:** Next.js + TypeScript + Tailwind + Shadcn UI + Socket.io  
 - **Data:** Prisma + **Neon PostgreSQL** (produksi) / Neon atau Postgres lokal (dev)  
-- **AI:** Gemini / OpenRouter (key user, dienkripsi at-rest)  
+- **AI:** OpenRouter (key user, dienkripsi at-rest — model bebas dipilih)  
 - **Messaging:** Grammy (Telegram) + Baileys (WhatsApp)  
 - **Deploy:** Docker Compose + `install.sh` / `deploy.sh` / `update.sh` + Nginx SSL
 

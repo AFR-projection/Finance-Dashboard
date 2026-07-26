@@ -1,9 +1,3 @@
-/**
- * WhatsApp worker using Baileys.
- * Deploy as a long-running process on VPS (Docker / PM2), NOT serverless.
- *
- * Flow: WhatsApp message → Baileys → POST /api/channels/ingress → AI → Finance Engine → reply
- */
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
@@ -23,7 +17,7 @@ const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "work
 const OWNER_USER_ID = process.env.WHATSAPP_OWNER_USER_ID || "";
 
 if (!WORKER_SECRET) {
-  log.warn("WHATSAPP_WORKER_SECRET is empty — ingress calls will fail auth");
+  log.warn("WHATSAPP_WORKER_SECRET is empty - ingress calls will fail auth");
 }
 
 async function syncSession(patch: {
@@ -48,57 +42,56 @@ async function syncSession(patch: {
 }
 
 async function processMessage(externalId: string, text: string): Promise<string> {
-  const linkMatch = text.match(/^link\s+([a-zA-Z0-9]+)$/i);
-  if (linkMatch) {
-    const res = await fetch(`${APP_URL}/api/channels`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "x-worker-secret": WORKER_SECRET,
-      },
-      body: JSON.stringify({
-        channel: "WHATSAPP",
-        externalId,
-        code: linkMatch[1],
-      }),
-    });
-    const json = (await res.json()) as { data?: { text?: string }; error?: string };
-    return json.data?.text || json.error || "Gagal pairing.";
-  }
+  try {
+    const linkMatch = text.match(/^link\s+([a-zA-Z0-9]+)$/i);
+    if (linkMatch) {
+      const res = await fetch(`${APP_URL}/api/channels`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "x-worker-secret": WORKER_SECRET,
+        },
+        body: JSON.stringify({ channel: "WHATSAPP", externalId, code: linkMatch[1] }),
+      });
+      const json = (await res.json()) as { data?: { text?: string }; error?: string };
+      return json.data?.text || json.error || "Gagal pairing.";
+    }
 
-  const authMatch = text.match(/^(approve|reject)\s+([a-zA-Z0-9]+)$/i);
-  if (authMatch) {
-    const action = authMatch[1].toLowerCase();
-    const res = await fetch(`${APP_URL}/api/access/confirm`, {
+    const authMatch = text.match(/^(approve|reject)\s+([a-zA-Z0-9]+)$/i);
+    if (authMatch) {
+      const action = authMatch[1].toLowerCase();
+      const res = await fetch(`${APP_URL}/api/access/confirm`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-worker-secret": WORKER_SECRET,
+        },
+        body: JSON.stringify({ action, code: authMatch[2] }),
+      });
+      const json = (await res.json()) as { data?: { text?: string }; error?: string };
+      return json.data?.text || json.error || "Gagal konfirmasi akses.";
+    }
+
+    const res = await fetch(`${APP_URL}/api/channels/ingress`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-worker-secret": WORKER_SECRET,
       },
-      body: JSON.stringify({ action, code: authMatch[2] }),
+      body: JSON.stringify({ channel: "WHATSAPP", externalId, message: text }),
+      timeout: 60000,
     });
     const json = (await res.json()) as { data?: { text?: string }; error?: string };
-    return json.data?.text || json.error || "Gagal konfirmasi akses.";
+    return json.data?.text || json.error || "Maaf, terjadi kesalahan.";
+  } catch (err) {
+    log.error({ err }, "processMessage failed");
+    return "Maaf, terjadi kesalahan koneksi. Coba lagi nanti.";
   }
-
-  const res = await fetch(`${APP_URL}/api/channels/ingress`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-worker-secret": WORKER_SECRET,
-    },
-    body: JSON.stringify({
-      channel: "WHATSAPP",
-      externalId,
-      message: text,
-    }),
-  });
-  const json = (await res.json()) as { data?: { text?: string }; error?: string };
-  return json.data?.text || json.error || "Maaf, terjadi kesalahan.";
 }
 
 async function startSock(): Promise<WASocket> {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
   const sock = makeWASocket({
@@ -130,7 +123,7 @@ async function startSock(): Promise<WASocket> {
       if (shouldReconnect) {
         startSock().catch((err) => log.error(err));
       } else {
-        log.error("Logged out — delete auth dir and restart to get a new QR");
+        log.error("Logged out - delete auth dir and restart to get a new QR");
       }
     } else if (connection === "open") {
       log.info("WhatsApp connected");
@@ -152,10 +145,9 @@ async function startSock(): Promise<WASocket> {
         msg.message?.imageMessage?.caption ||
         "";
 
-      // Future: voice notes → transcription stub
       if (!text.trim() && msg.message?.audioMessage) {
         await sock.sendMessage(jid, {
-          text: "Pesan suara terdeteksi. Transkripsi suara akan tersedia di update berikutnya — kirim teks dulu ya.",
+          text: "Pesan suara terdeteksi. Transkripsi suara akan tersedia di update berikutnya - kirim teks dulu ya.",
         });
         continue;
       }
@@ -166,8 +158,16 @@ async function startSock(): Promise<WASocket> {
       log.info({ phone }, "Incoming WhatsApp message");
 
       try {
+        await sock.sendMessage(jid, { text: "_Ledgerly sedang memproses..._" });
         const reply = await processMessage(phone, text.trim());
-        await sock.sendMessage(jid, { text: reply });
+        if (reply.length > 4000) {
+          const chunks = reply.match(/.{1,4000}/gs) ?? [];
+          for (const chunk of chunks) {
+            await sock.sendMessage(jid, { text: chunk });
+          }
+        } else {
+          await sock.sendMessage(jid, { text: reply });
+        }
       } catch (error) {
         log.error(error, "Failed processing WhatsApp message");
         await sock.sendMessage(jid, {

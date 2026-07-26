@@ -285,12 +285,17 @@ apply_runtime_urls() {
     set_env_var APP_DOMAIN "$domain" "$ENV_FILE"
     set_env_var NEXT_PUBLIC_APP_URL "https://${domain}" "$ENV_FILE"
     set_env_var AUTH_URL "https://${domain}" "$ENV_FILE"
+    # Nginx yang menghadap publik — app cukup didengar dari loopback.
+    set_env_var APP_BIND "127.0.0.1" "$ENV_FILE"
     ok "Public URL: https://${domain}"
   else
     ip="$(detect_public_ip)"
     set_env_var NEXT_PUBLIC_APP_URL "http://${ip}:${port}" "$ENV_FILE"
     set_env_var AUTH_URL "http://${ip}:${port}" "$ENV_FILE"
+    # Belum ada domain — port harus terbuka agar bisa diakses via IP.
+    set_env_var APP_BIND "0.0.0.0" "$ENV_FILE"
     warn "Tanpa domain — sementara: http://${ip}:${port}"
+    warn "Port ${port} terbuka ke internet. Isi APP_DOMAIN lalu ./update.sh untuk menutupnya."
   fi
 
   load_dotenv

@@ -93,7 +93,7 @@ Edit `.env`:
 | `ENCRYPTION_KEY` | Yes | 64 hex chars |
 | `WHATSAPP_WORKER_SECRET` | Yes | bebas untuk local |
 | `REDIS_URL` | No | kosongkan di local |
-| `GEMINI_API_KEY` | No | atau isi di Settings UI |
+| `OPENROUTER_API_KEY` | No | atau isi di Settings UI |
 
 ## 3. Database
 

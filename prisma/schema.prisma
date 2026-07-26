@@ -13,7 +13,6 @@ enum TransactionType {
 }
 
 enum AiProvider {
-  GEMINI
   OPENROUTER
 }
 
@@ -98,8 +97,8 @@ model VerificationToken {
 model UserSettings {
   id                   String     @id @default(cuid())
   userId               String     @unique @map("user_id")
-  aiProvider           AiProvider @default(GEMINI) @map("ai_provider")
-  aiModel              String     @default("gemini-2.0-flash") @map("ai_model")
+  aiProvider           AiProvider @default(OPENROUTER) @map("ai_provider")
+  aiModel              String     @default("openai/gpt-4o-mini") @map("ai_model")
   encryptedApiKey      String?    @map("encrypted_api_key") @db.Text
   currency             String     @default("IDR")
   timezone             String     @default("Asia/Jakarta")

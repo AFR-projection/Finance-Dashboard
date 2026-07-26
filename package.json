@@ -35,7 +35,6 @@
     "@auth/prisma-adapter": "^2.11.3",
     "@base-ui/react": "^1.6.0",
     "@fingerprintjs/fingerprintjs": "^5.2.0",
-    "@google/generative-ai": "^0.24.1",
     "@hapi/boom": "^10.0.1",
     "@prisma/client": "^5.22.0",
     "@whiskeysockets/baileys": "^7.0.0-rc13",

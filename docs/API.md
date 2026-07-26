@@ -119,8 +119,7 @@ Tools (always via Finance Engine):
 
 ```json
 {
-  "aiProvider": "GEMINI",
-  "aiModel": "gemini-2.0-flash",
+  "aiModel": "openai/gpt-4o-mini",
   "apiKey": "optional-new-key",
   "currency": "IDR",
   "timezone": "Asia/Jakarta"

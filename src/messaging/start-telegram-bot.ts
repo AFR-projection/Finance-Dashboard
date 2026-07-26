@@ -1,7 +1,3 @@
-/**
- * Embedded Telegram bot (approve/reject access + finance NL).
- * Started from server.ts so local `npm run dev` tidak perlu worker terpisah.
- */
 import { Bot, GrammyError, HttpError } from "grammy";
 import { prisma } from "../lib/db";
 
@@ -24,7 +20,7 @@ export async function startEmbeddedTelegramBot() {
 
   const token = await resolveToken();
   if (!token) {
-    console.warn("[telegram] no token in .env or AppConfig — /approve tidak akan jalan sampai token di-set");
+    console.warn("[telegram] no token in .env or AppConfig - /approve tidak akan jalan sampai token di-set");
     return;
   }
 
@@ -34,34 +30,44 @@ export async function startEmbeddedTelegramBot() {
   const bot = new Bot(token);
 
   async function confirmAccess(action: "approve" | "reject", code: string) {
-    const res = await fetch(`${APP_URL}/api/access/confirm`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-worker-secret": WORKER_SECRET,
-      },
-      body: JSON.stringify({ action, code }),
-    });
-    const json = (await res.json()) as { data?: { text?: string }; error?: string };
-    return json.data?.text || json.error || "Gagal memproses.";
+    try {
+      const res = await fetch(`${APP_URL}/api/access/confirm`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-worker-secret": WORKER_SECRET,
+        },
+        body: JSON.stringify({ action, code }),
+      });
+      const json = (await res.json()) as { data?: { text?: string }; error?: string };
+      return json.data?.text || json.error || "Gagal memproses.";
+    } catch {
+      return "Gagal terhubung ke server. Coba lagi nanti.";
+    }
   }
 
   async function askAgent(externalId: string, message: string) {
-    const res = await fetch(`${APP_URL}/api/channels/ingress`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-worker-secret": WORKER_SECRET,
-      },
-      body: JSON.stringify({ channel: "TELEGRAM", externalId, message }),
-    });
-    const json = (await res.json()) as { data?: { text?: string }; error?: string };
-    return json.data?.text || json.error || "Maaf, terjadi kesalahan.";
+    try {
+      const res = await fetch(`${APP_URL}/api/channels/ingress`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-worker-secret": WORKER_SECRET,
+        },
+        body: JSON.stringify({ channel: "TELEGRAM", externalId, message }),
+      });
+      const json = (await res.json()) as { data?: { text?: string }; error?: string };
+      return json.data?.text || json.error || "Maaf, terjadi kesalahan.";
+    } catch {
+      return "Maaf, terjadi kesalahan koneksi. Coba lagi nanti.";
+    }
   }
 
   bot.command("start", async (ctx) => {
     await ctx.reply(
-      `Ledgerly bot aktif.\nChat ID kamu: ${ctx.from?.id}\n\n/approve KODE — izinkan akses web\n/reject KODE — tolak`,
+      `Ledgerly bot aktif.\nChat ID kamu: ${ctx.from?.id}\n\n` +
+        `/approve KODE - izinkan akses web\n/reject KODE - tolak\n\n` +
+        `Atau kirim pesan biasa seperti "beli makan 35 ribu"`,
     );
   });
 
@@ -89,7 +95,6 @@ export async function startEmbeddedTelegramBot() {
       return;
     }
 
-    // bare code → treat as approve (owner convenience)
     if (/^[a-fA-F0-9]{6}$/.test(text)) {
       await ctx.reply(await confirmAccess("approve", text));
       return;
@@ -107,11 +112,10 @@ export async function startEmbeddedTelegramBot() {
     else console.error("[telegram]", e);
   });
 
-  // Avoid conflict if separate worker also polls same token
   try {
     await bot.api.deleteWebhook({ drop_pending_updates: false });
     bot.start({
-      onStart: (info) => console.log(`[telegram] embedded bot @${info.username} listening for /approve`),
+      onStart: (info) => console.log(`[telegram] embedded bot @${info.username} listening`),
     });
   } catch (err) {
     console.error("[telegram] failed to start embedded bot:", err);

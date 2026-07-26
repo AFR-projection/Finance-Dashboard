@@ -2,12 +2,10 @@ import { decryptSecret } from "@/lib/crypto";
 import { prisma } from "@/lib/db";
 import type { AiRuntimeConfig } from "./agent";
 
+const DEFAULT_MODEL = "openai/gpt-4o-mini";
+
 export async function resolveAiConfig(userId: string): Promise<AiRuntimeConfig> {
   const settings = await prisma.userSettings.findUnique({ where: { userId } });
-  const provider = settings?.aiProvider ?? "GEMINI";
-  const model =
-    settings?.aiModel ??
-    (provider === "GEMINI" ? "gemini-2.0-flash" : "openai/gpt-4o-mini");
 
   let apiKey = "";
   if (settings?.encryptedApiKey) {
@@ -18,12 +16,17 @@ export async function resolveAiConfig(userId: string): Promise<AiRuntimeConfig> 
     }
   }
 
-  if (!apiKey) {
-    apiKey =
-      provider === "GEMINI"
-        ? process.env.GEMINI_API_KEY || ""
-        : process.env.OPENROUTER_API_KEY || "";
-  }
+  if (!apiKey) apiKey = process.env.OPENROUTER_API_KEY || "";
 
-  return { provider, model, apiKey };
+  const fallbackModels = (process.env.OPENROUTER_FALLBACK_MODELS || "")
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+
+  return {
+    provider: "OPENROUTER",
+    model: settings?.aiModel || DEFAULT_MODEL,
+    apiKey,
+    fallbackModels,
+  };
 }

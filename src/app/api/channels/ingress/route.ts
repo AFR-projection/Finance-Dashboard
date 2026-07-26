@@ -5,10 +5,6 @@ import { resolveAiConfig } from "@/ai/resolve-config";
 import { prisma } from "@/lib/db";
 import { rateLimit } from "@/lib/rate-limit";
 
-/**
- * Internal channel ingress used by WhatsApp/Telegram workers.
- * Authenticated via shared worker secret + linked external user id.
- */
 const payloadSchema = z.object({
   channel: z.enum(["WHATSAPP", "TELEGRAM"]),
   externalId: z.string().min(1),
@@ -23,6 +19,7 @@ export async function POST(request: Request) {
 
   try {
     const body = payloadSchema.parse(await request.json());
+
     const rl = rateLimit(`channel:${body.channel}:${body.externalId}`, 30);
     if (!rl.ok) {
       return NextResponse.json({ ok: false, error: "Rate limited" }, { status: 429 });
@@ -42,7 +39,8 @@ export async function POST(request: Request) {
         ok: true,
         data: {
           text:
-            "Akun belum terhubung. Buka dashboard → Channels, lalu tautkan WhatsApp/Telegram Anda.",
+            "Akun belum terhubung. Buka dashboard > Channels, lalu tautkan WhatsApp/Telegram Anda.",
+          toolsUsed: [],
         },
       });
     }
@@ -57,7 +55,21 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, data: reply });
   } catch (error) {
-    console.error(error);
-    return NextResponse.json({ ok: false, error: "Channel processing failed" }, { status: 500 });
+    console.error("[ingress] error:", error);
+    const message =
+      error instanceof z.ZodError
+        ? "Invalid payload"
+        : "Channel processing failed";
+    return NextResponse.json(
+      {
+        ok: false,
+        data: {
+          text: "Maaf, terjadi kesalahan sistem. Coba lagi sebentar.",
+          toolsUsed: [],
+        },
+        error: message,
+      },
+      { status: error instanceof z.ZodError ? 400 : 500 },
+    );
   }
 }

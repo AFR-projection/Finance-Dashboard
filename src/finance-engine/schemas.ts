@@ -53,7 +53,7 @@ export const aiMemorySchema = z.object({
 });
 
 export const aiSettingsSchema = z.object({
-  aiProvider: z.enum(["GEMINI", "OPENROUTER"]),
+  aiProvider: z.literal("OPENROUTER").default("OPENROUTER"),
   aiModel: z.string().min(1).max(120),
   apiKey: z.string().min(10).max(500).optional(),
   currency: z.string().length(3).optional(),

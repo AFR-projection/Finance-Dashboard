@@ -35,7 +35,7 @@ Assert:
 
 ### AI Agent
 
-1. Configure Gemini/OpenRouter key in Settings
+1. Configure OpenRouter key in Settings
 2. Open `/dashboard/agent`
 3. Send: `Saya beli kopi 25 ribu`
 4. Expect tool `createTransaction` and confirmation reply

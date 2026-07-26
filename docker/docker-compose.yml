@@ -34,7 +34,9 @@ services:
         DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build?schema=public
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-3047}:3000"
+      # Bind ke loopback: hanya Nginx yang boleh menjangkau app.
+      # Tanpa domain (akses via http://IP:PORT), set APP_BIND=0.0.0.0 di .env.
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-3047}:3000"
     env_file:
       - .env
     environment:
