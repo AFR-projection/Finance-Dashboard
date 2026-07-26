@@ -35,7 +35,6 @@ Tanpa `git pull` (hanya rebuild):
 ```bash
 git clone https://github.com/AFR-projection/Finance-Dashboard.git /opt/ledgerly
 cd /opt/ledgerly
-chmod +x install.sh deploy.sh update.sh scripts/*.sh
 ```
 
 ### 2) Buat & isi file `.env`
@@ -65,13 +64,13 @@ Opsional di `.env` / CLI:
 ### 3) Jalankan installer
 
 ```bash
-./install.sh
+bash ./install.sh
 ```
 
 Atau dengan domain eksplisit:
 
 ```bash
-APP_DOMAIN=finance.domainkamu.com ./install.sh
+APP_DOMAIN=finance.domainkamu.com bash ./install.sh
 ```
 
 Installer akan:
@@ -82,7 +81,7 @@ Installer akan:
 4. **Auto-detect port kosong** (aman di VPS multi-app)  
 5. Build & up: `app` + `redis` + bot workers  
 6. Generate Nginx + Certbot HTTPS (jika `APP_DOMAIN` diisi)  
-7. Health-check `/api/health`
+7. Health-check PostgreSQL + Redis melalui `/api/health`; instalasi berhenti jika tidak sehat
 
 ### 4) Setup owner
 
@@ -129,7 +128,7 @@ Telegram worker (Grammy)
 |---------|--------|
 | Build Prisma / `DATABASE_URL` | Build pakai dummy URL; Neon hanya di **runtime**. Pastikan `.env` benar. |
 | `DATABASE_URL` ditolak script | Jangan pakai host `postgres` Docker — wajib Neon. |
-| Certbot gagal | DNS A record belum ke IP VPS — ulang: `sudo certbot --nginx -d DOMAIN` |
+| Installer berhenti di Certbot | Pastikan DNS A/AAAA sudah ke VPS, lalu ulangi `bash ./install.sh`. Installer tidak akan mengklaim sukses tanpa HTTPS. |
 | `/approve` bot diam | Isi token di `/setup`, `./deploy.sh`, cek `./scripts/logs.sh telegram-worker` |
 | Port bentrok | `APP_PORT=7341 ./deploy.sh` |
 

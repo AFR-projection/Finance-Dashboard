@@ -36,12 +36,14 @@ export type ReceiptOcrResult = {
 export async function transcribeVoice(
   _req: VoiceTranscriptionRequest,
 ): Promise<VoiceTranscriptionResult> {
+  void _req;
   throw new Error(
     "Voice transcription is not enabled yet. Phase 2: wire Whisper / Gemini audio here.",
   );
 }
 
 export async function parseReceipt(_req: ReceiptOcrRequest): Promise<ReceiptOcrResult> {
+  void _req;
   throw new Error(
     "Receipt OCR is not enabled yet. Phase 2: wire Gemini vision / Document AI here.",
   );

@@ -15,10 +15,9 @@ async function verify(token: string) {
   }
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Public paths
   if (
     pathname.startsWith("/api/setup") ||
     pathname.startsWith("/api/access") ||
@@ -31,19 +30,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Bootstrap & access UI always reachable (pages decide what to show)
   if (pathname === "/setup" || pathname === "/access" || pathname === "/denied") {
     return NextResponse.next();
   }
 
   const token = request.cookies.get(ACCESS_COOKIE)?.value;
   const userId = token ? await verify(token) : null;
-
-  // Protect app pages
   const needsAuth =
-    pathname.startsWith("/dashboard") ||
-    pathname.startsWith("/settings") ||
-    pathname === "/";
+    pathname.startsWith("/dashboard") || pathname.startsWith("/settings") || pathname === "/";
 
   if (needsAuth && !userId && pathname !== "/") {
     return NextResponse.redirect(new URL("/access", request.url));

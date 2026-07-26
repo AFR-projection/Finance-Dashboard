@@ -34,7 +34,8 @@ export default function GoalsPage() {
   }
 
   useEffect(() => {
-    load();
+    const initial = setTimeout(() => void load(), 0);
+    return () => clearTimeout(initial);
   }, []);
 
   async function createGoal(e: React.FormEvent) {

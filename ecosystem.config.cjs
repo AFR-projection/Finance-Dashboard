@@ -2,6 +2,7 @@
  * PM2 ecosystem — loads .env automatically so secrets & DB URL are correct.
  * WhatsApp session persists in WHATSAPP_AUTH_DIR (never deleted by redeploy).
  */
+/* eslint-disable @typescript-eslint/no-require-imports */
 const fs = require("fs");
 const path = require("path");
 

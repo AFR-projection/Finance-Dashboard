@@ -99,8 +99,7 @@ Buka http://localhost:3000 — panduan lengkap: **[docs/SETUP.md](docs/SETUP.md)
 git clone https://github.com/AFR-projection/Finance-Dashboard.git /opt/ledgerly
 cd /opt/ledgerly
 cp .env.example .env && nano .env   # WAJIB: DATABASE_URL Neon
-chmod +x install.sh deploy.sh update.sh
-./install.sh
+bash ./install.sh
 ```
 
 Update versi nanti: `cd /opt/ledgerly && ./update.sh`

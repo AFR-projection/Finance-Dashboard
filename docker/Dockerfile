@@ -9,7 +9,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
-RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+RUN npm ci --legacy-peer-deps
 
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
@@ -25,7 +25,6 @@ ENV DATABASE_URL=$DATABASE_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_PRIVATE_STANDALONE=false
 
-RUN npx prisma generate
 RUN npm run build
 
 FROM node:22-bookworm-slim AS runner
@@ -48,7 +47,10 @@ COPY --from=builder /app/next.config.ts ./
 COPY --from=builder /app/server.ts ./
 COPY --from=builder /app/ecosystem.config.cjs ./
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN mkdir -p /app/logs /app/.next/cache /data/wa-auth \
+  && chown -R node:node /app /data/wa-auth \
+  && chmod +x /entrypoint.sh
 
 EXPOSE 3000
+USER node
 ENTRYPOINT ["/entrypoint.sh"]

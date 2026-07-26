@@ -77,8 +77,9 @@ export default function TransactionsPage() {
   }
 
   useEffect(() => {
-    load();
+    const initial = setTimeout(() => void load(), 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => clearTimeout(initial);
   }, []);
 
   async function remove(id: string) {

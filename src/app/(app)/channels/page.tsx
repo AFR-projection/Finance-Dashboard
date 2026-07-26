@@ -44,9 +44,12 @@ export default function ChannelsPage() {
   }
 
   useEffect(() => {
-    load();
-    const t = setInterval(load, 15000);
-    return () => clearInterval(t);
+    const initial = setTimeout(() => void load(), 0);
+    const poll = setInterval(() => void load(), 15000);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(poll);
+    };
   }, []);
 
   async function generatePairCode() {
@@ -118,7 +121,7 @@ export default function ChannelsPage() {
           <CardHeader>
             <CardTitle>WhatsApp session</CardTitle>
             <CardDescription>
-              Status koneksi Baileys worker (set WHATSAPP_OWNER_USER_ID untuk sync QR ke dashboard).
+              Status koneksi Baileys worker dan QR pairing terbaru.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

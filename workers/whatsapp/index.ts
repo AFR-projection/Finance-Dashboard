@@ -14,10 +14,26 @@ const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 const WORKER_SECRET = process.env.WHATSAPP_WORKER_SECRET || "";
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "workers", ".wa-auth");
-const OWNER_USER_ID = process.env.WHATSAPP_OWNER_USER_ID || "";
+const CONFIGURED_OWNER_USER_ID = process.env.WHATSAPP_OWNER_USER_ID || "";
+let resolvedOwnerUserId = CONFIGURED_OWNER_USER_ID;
 
 if (!WORKER_SECRET) {
   log.warn("WHATSAPP_WORKER_SECRET is empty - ingress calls will fail auth");
+}
+
+async function getOwnerUserId(): Promise<string> {
+  if (resolvedOwnerUserId) return resolvedOwnerUserId;
+  try {
+    const res = await fetch(`${APP_URL}/api/channels/whatsapp-session`, {
+      headers: { "x-worker-secret": WORKER_SECRET },
+    });
+    if (!res.ok) return "";
+    const json = (await res.json()) as { data?: { userId?: string } };
+    resolvedOwnerUserId = json.data?.userId || "";
+    return resolvedOwnerUserId;
+  } catch {
+    return "";
+  }
 }
 
 async function syncSession(patch: {
@@ -26,7 +42,8 @@ async function syncSession(patch: {
   phoneNumber?: string | null;
   sessionData?: string | null;
 }) {
-  if (!OWNER_USER_ID) return;
+  const ownerUserId = await getOwnerUserId();
+  if (!ownerUserId) return;
   try {
     await fetch(`${APP_URL}/api/channels/whatsapp-session`, {
       method: "POST",
@@ -34,7 +51,7 @@ async function syncSession(patch: {
         "Content-Type": "application/json",
         "x-worker-secret": WORKER_SECRET,
       },
-      body: JSON.stringify({ userId: OWNER_USER_ID, ...patch }),
+      body: JSON.stringify({ userId: ownerUserId, ...patch }),
     });
   } catch (err) {
     log.warn({ err }, "Failed to sync WhatsApp session metadata");

@@ -42,7 +42,8 @@ export default function BudgetsPage() {
   }
 
   useEffect(() => {
-    load();
+    const initial = setTimeout(() => void load(), 0);
+    return () => clearTimeout(initial);
   }, []);
 
   async function onSubmit(e: FormEvent) {

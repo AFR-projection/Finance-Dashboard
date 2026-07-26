@@ -37,9 +37,10 @@ step "Rebuild containers..."
 stack_up_build
 
 step "Health-check..."
-wait_app_http "$CHOSEN_PORT" || true
+wait_app_http "$CHOSEN_PORT"
 DOMAIN="$(get_env_var APP_DOMAIN "$ENV_FILE")"
 write_nginx_site "$CHOSEN_PORT" "${DOMAIN:-_}"
+sync_nginx_upstream "$CHOSEN_PORT" "${DOMAIN:-_}"
 
 step "Selesai"
 compose ps || true

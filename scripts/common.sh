@@ -146,14 +146,36 @@ get_env_var() {
 }
 
 load_dotenv() {
-  set -a
-  # shellcheck disable=SC1090
-  source <(grep -E '^[A-Z0-9_]+=' "$ENV_FILE" | sed 's/\r$//' || true)
-  set +a
+  die "load_dotenv is disabled: .env is not a shell script"
+}
+
+secure_env_file() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  chmod 600 "$ENV_FILE" || die "Tidak bisa mengamankan permission .env"
+}
+
+validate_port() {
+  local port="$1"
+  [[ "$port" =~ ^[0-9]+$ ]] || die "APP_PORT harus angka (1024-65535), bukan: ${port}"
+  (( port >= 1024 && port <= 65535 )) || die "APP_PORT harus di rentang 1024-65535"
+}
+
+validate_domain() {
+  local domain="$1"
+  local label
+  [[ ${#domain} -le 253 ]] || die "APP_DOMAIN terlalu panjang"
+  [[ "$domain" == *.* ]] || die "APP_DOMAIN harus FQDN, contoh: finance.example.com"
+  IFS='.' read -r -a labels <<< "$domain"
+  for label in "${labels[@]}"; do
+    [[ ${#label} -ge 1 && ${#label} -le 63 ]] || die "Label APP_DOMAIN tidak valid: ${domain}"
+    [[ "$label" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] \
+      || die "APP_DOMAIN tidak valid: ${domain}"
+  done
 }
 
 port_in_use() {
   local p="$1"
+  validate_port "$p"
   if command -v ss >/dev/null 2>&1; then
     ss -H -tuln 2>/dev/null | grep -qE ":${p}([[:space:]]|$)" && return 0
   fi
@@ -186,6 +208,7 @@ pick_free_port() {
   local preferred existing p
 
   if [[ -n "$override" && "$override" != "auto" ]]; then
+    validate_port "$override"
     is_blocked_port "$override" && die "APP_PORT=${override} terlarang. Contoh aman: 3047, 5183, 7341"
     port_in_use "$override" && die "APP_PORT=${override} sedang dipakai."
     echo "$override"
@@ -247,6 +270,7 @@ validate_neon_database_url() {
 # Generate secrets; keep Neon DATABASE_URL untouched.
 prepare_env_secrets() {
   [[ -f "$ENV_FILE" ]] || die ".env tidak ada. Jalankan: cp .env.example .env && nano .env"
+  secure_env_file
 
   local v
   v="$(get_env_var AUTH_SECRET "$ENV_FILE")"
@@ -271,17 +295,21 @@ prepare_env_secrets() {
   set_env_var WHATSAPP_AUTH_DIR "/data/wa-auth" "$ENV_FILE"
   set_env_var TELEGRAM_EMBEDDED "0" "$ENV_FILE"
   set_env_var REDIS_URL "redis://redis:6379" "$ENV_FILE"
+  secure_env_file
 }
 
 apply_runtime_urls() {
   local port="$1"
   local domain ip
 
+  validate_port "$port"
+
   set_env_var APP_PORT "$port" "$ENV_FILE"
   set_env_var REDIS_URL "redis://redis:6379" "$ENV_FILE"
 
   domain="${APP_DOMAIN:-$(get_env_var APP_DOMAIN "$ENV_FILE")}"
   if [[ -n "$domain" && "$domain" != "your.domain.com" ]]; then
+    validate_domain "$domain"
     set_env_var APP_DOMAIN "$domain" "$ENV_FILE"
     set_env_var NEXT_PUBLIC_APP_URL "https://${domain}" "$ENV_FILE"
     set_env_var AUTH_URL "https://${domain}" "$ENV_FILE"
@@ -298,15 +326,17 @@ apply_runtime_urls() {
     warn "Port ${port} terbuka ke internet. Isi APP_DOMAIN lalu ./update.sh untuk menutupnya."
   fi
 
-  load_dotenv
+  secure_env_file
 }
 
 backup_env() {
   mkdir -p "$ENV_BACKUP_DIR"
+  chmod 700 "$ENV_BACKUP_DIR" || die "Tidak bisa mengamankan ${ENV_BACKUP_DIR}"
   local stamp dest
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
   dest="${ENV_BACKUP_DIR}/.env.${stamp}"
   cp "$ENV_FILE" "$dest"
+  chmod 600 "$dest" || die "Tidak bisa mengamankan backup .env"
   ok "Backup .env → ${dest}"
 }
 
@@ -348,6 +378,10 @@ server {
 
     client_max_body_size 20M;
 
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+
     location / {
         proxy_pass http://ledgerly_upstream;
         proxy_http_version 1.1;
@@ -358,6 +392,7 @@ server {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
         proxy_buffering off;
     }
 
@@ -373,11 +408,50 @@ server {
         proxy_read_timeout 86400;
         proxy_buffering off;
     }
+
+    access_log /var/log/nginx/ledgerly.access.log;
+    error_log  /var/log/nginx/ledgerly.error.log;
 }
 EOF
 
   echo "LEDGERLY_HOST_PORT=${port}" > "${GENERATED_DIR}/PORT.txt"
   ok "Nginx config → deploy/generated/nginx-ledgerly.conf"
+}
+
+# Only change the active upstream. Copying the generated HTTP template over the
+# active site would erase the TLS directives maintained by Certbot.
+sync_nginx_upstream() {
+  local port="$1" domain="${2:-}"
+  local backup="${NGINX_SITE_AVAILABLE}.ledgerly-backup"
+
+  [[ -f "$NGINX_SITE_AVAILABLE" ]] || {
+    warn "Site Nginx belum terpasang; config hanya tersedia di deploy/generated/"
+    return 0
+  }
+
+  if [[ -n "$domain" && "$domain" != "_" ]]; then
+    validate_domain "$domain"
+    sudo_cmd grep -qE "^[[:space:]]*server_name[[:space:]]+${domain//./\\.};" "$NGINX_SITE_AVAILABLE" \
+      || die "APP_DOMAIN berubah. Jalankan ./install.sh agar sertifikat domain baru dibuat dengan aman."
+  fi
+
+  sudo_cmd cp "$NGINX_SITE_AVAILABLE" "$backup"
+  if ! sudo_cmd sed -i -E "s/server 127\\.0\\.0\\.1:[0-9]+;/server 127.0.0.1:${port};/" "$NGINX_SITE_AVAILABLE"; then
+    sudo_cmd cp "$backup" "$NGINX_SITE_AVAILABLE"
+    die "Gagal memperbarui upstream Nginx"
+  fi
+  if ! sudo_cmd grep -q "server 127.0.0.1:${port};" "$NGINX_SITE_AVAILABLE"; then
+    sudo_cmd cp "$backup" "$NGINX_SITE_AVAILABLE"
+    die "Upstream Nginx tidak ditemukan; konfigurasi lama dipulihkan"
+  fi
+  if ! sudo_cmd nginx -t; then
+    sudo_cmd cp "$backup" "$NGINX_SITE_AVAILABLE"
+    sudo_cmd nginx -t || true
+    die "Konfigurasi Nginx tidak valid; konfigurasi lama dipulihkan"
+  fi
+  sudo_cmd systemctl reload nginx
+  sudo_cmd rm -f "$backup"
+  ok "Nginx mempertahankan TLS dan mengarah ke 127.0.0.1:${port}"
 }
 
 install_nginx_ssl() {
@@ -394,21 +468,16 @@ install_nginx_ssl() {
 
   sudo_cmd cp "${GENERATED_DIR}/nginx-ledgerly.conf" "$NGINX_SITE_AVAILABLE"
   sudo_cmd ln -sf "$NGINX_SITE_AVAILABLE" "$NGINX_SITE_ENABLED"
-  # Remove default site if it steals port 80
-  if [[ -L /etc/nginx/sites-enabled/default ]]; then
-    sudo_cmd rm -f /etc/nginx/sites-enabled/default || true
-  fi
-
   sudo_cmd nginx -t
   sudo_cmd systemctl reload nginx
   ok "Nginx proxy → 127.0.0.1:${port}"
 
   log "Minta sertifikat Let's Encrypt untuk ${domain}…"
-  if sudo_cmd certbot --nginx -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --redirect; then
-    ok "HTTPS aktif: https://${domain}"
-  else
-    warn "Certbot gagal (DNS belum pointing?). Nginx HTTP tetap jalan. Ulangi: sudo certbot --nginx -d ${domain}"
+  if ! sudo_cmd certbot --nginx -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --redirect; then
+    err "Certbot gagal. Pastikan DNS A/AAAA sudah mengarah ke VPS, lalu jalankan ./install.sh lagi."
+    return 1
   fi
+  ok "HTTPS aktif: https://${domain}"
 }
 
 print_banner() {

@@ -1,16 +1,14 @@
 import { z } from "zod";
 import { getClientIp, lookupGeo } from "@/lib/geo";
-import { getAppConfig, notifyOwner, requireOwnerUserId } from "@/lib/app-config";
+import { getAppConfig, notifyOwner } from "@/lib/app-config";
 import {
   accessTtlSeconds,
   newAccessIds,
   saveAccessChallenge,
   getAccessChallenge,
 } from "@/lib/access-challenge";
-import { accessCookieOptions, signAccessToken } from "@/lib/access-session";
 import { logSuspiciousLogin } from "@/lib/security-log";
 import { rateLimit } from "@/lib/rate-limit";
-import { NextResponse } from "next/server";
 
 const startSchema = z.object({
   fingerprintId: z.string().min(8).max(128),

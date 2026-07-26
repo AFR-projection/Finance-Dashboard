@@ -10,6 +10,12 @@
 
 name: ledgerly
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   redis:
     image: redis:7-alpine
@@ -23,6 +29,7 @@ services:
       retries: 20
     networks:
       - ledgerly_net
+    logging: *default-logging
 
   app:
     build:
@@ -58,6 +65,7 @@ services:
       timeout: 10s
       retries: 20
       start_period: 120s
+    logging: *default-logging
 
   telegram-worker:
     build:
@@ -79,6 +87,7 @@ services:
     networks:
       - ledgerly_net
     entrypoint: ["npx", "tsx", "workers/telegram/index.ts"]
+    logging: *default-logging
 
   whatsapp-worker:
     build:
@@ -103,6 +112,7 @@ services:
     networks:
       - ledgerly_net
     entrypoint: ["npx", "tsx", "workers/whatsapp/index.ts"]
+    logging: *default-logging
 
 volumes:
   redis_data:

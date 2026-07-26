@@ -36,7 +36,8 @@ backup_env
 
 step "Pull kode..."
 if [[ "$DO_PULL" -eq 1 && -d .git ]]; then
-  git pull --ff-only && ok "git pull OK" || warn "git pull gagal — lanjut kode lokal"
+  git pull --ff-only || die "git pull gagal. Perbaiki konflik/koneksi, atau pilih eksplisit: ./update.sh --no-pull"
+  ok "git pull OK"
 else
   ok "Skip pull"
 fi
@@ -60,12 +61,11 @@ stack_up_build
 ok "Schema sync via entrypoint (prisma db push → Neon)"
 
 step "Health-check..."
-wait_app_http "$PORT" || true
+wait_app_http "$PORT"
 DOMAIN="$(get_env_var APP_DOMAIN "$ENV_FILE")"
 write_nginx_site "$PORT" "${DOMAIN:-_}"
 if [[ -n "$DOMAIN" && -f "$NGINX_SITE_AVAILABLE" ]]; then
-  sudo_cmd cp "${GENERATED_DIR}/nginx-ledgerly.conf" "$NGINX_SITE_AVAILABLE" 2>/dev/null || true
-  sudo_cmd nginx -t 2>/dev/null && sudo_cmd systemctl reload nginx 2>/dev/null || true
+  sync_nginx_upstream "$PORT" "$DOMAIN"
 fi
 
 step "Selesai"

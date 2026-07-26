@@ -10,6 +10,23 @@ const schema = z.object({
   sessionData: z.string().nullable().optional(),
 });
 
+/** Internal: worker discovers the single self-hosted owner after web setup. */
+export async function GET(request: Request) {
+  const secret = request.headers.get("x-worker-secret");
+  if (!secret || secret !== process.env.WHATSAPP_WORKER_SECRET) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  const owner = await prisma.user.findFirst({
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  if (!owner) {
+    return NextResponse.json({ ok: false, error: "Owner belum setup" }, { status: 404 });
+  }
+  return NextResponse.json({ ok: true, data: { userId: owner.id } });
+}
+
 /** Internal: WhatsApp worker syncs connection metadata for dashboard QR display */
 export async function POST(request: Request) {
   const secret = request.headers.get("x-worker-secret");

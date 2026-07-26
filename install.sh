@@ -18,6 +18,9 @@ set -euo pipefail
 cd "$(dirname "$0")" || exit 1
 ROOT_DIR="$(pwd)"
 
+# The repository may be cloned from a filesystem that does not preserve mode bits.
+chmod +x install.sh deploy.sh update.sh redeploy.sh scripts/*.sh docker/entrypoint.sh
+
 export TOTAL_STEPS=9
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/common.sh"
@@ -52,7 +55,7 @@ step "Build & up stack..."
 stack_up_build
 
 step "Health-check..."
-wait_app_http "$CHOSEN_PORT" || true
+wait_app_http "$CHOSEN_PORT"
 compose ps || true
 
 step "Nginx + SSL..."

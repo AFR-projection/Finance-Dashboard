@@ -22,6 +22,7 @@ export async function transcribeAudio(_input: {
   buffer: Buffer;
   mimeType: string;
 }): Promise<TranscriptionResult> {
+  void _input;
   throw new Error("Voice transcription is not enabled yet. Wire Whisper / Gemini audio here.");
 }
 
@@ -29,5 +30,6 @@ export async function parseReceiptImage(_input: {
   buffer: Buffer;
   mimeType: string;
 }): Promise<ReceiptOcrResult> {
+  void _input;
   throw new Error("Receipt OCR is not enabled yet. Wire Gemini vision / Document AI here.");
 }
