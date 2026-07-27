@@ -1,15 +1,46 @@
 import { Bot, GrammyError, HttpError } from "grammy";
 import pino from "pino";
+import { prisma } from "../../src/lib/db";
+import { parseTelegramAccessConfirmation } from "../../src/messaging/telegram-access-command";
 
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
-const token = process.env.TELEGRAM_BOT_TOKEN;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 const WORKER_SECRET = process.env.WHATSAPP_WORKER_SECRET || "";
+const TOKEN_RETRY_MS = 10_000;
 
-if (!token) {
-  log.warn("TELEGRAM_BOT_TOKEN kosong — worker idle. Isi di .env lalu redeploy");
-  setInterval(() => {}, 60_000);
-} else {
+async function resolveToken(): Promise<{ token: string; source: "database" | "environment" } | null> {
+  try {
+    const cfg = await prisma.appConfig.findUnique({ where: { id: "singleton" } });
+    const fromDatabase = cfg?.telegramBotToken?.trim();
+    if (fromDatabase) return { token: fromDatabase, source: "database" };
+  } catch (err) {
+    log.warn({ err }, "Belum bisa membaca token Telegram dari database");
+  }
+
+  const fromEnv = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  return fromEnv ? { token: fromEnv, source: "environment" } : null;
+}
+
+async function waitForToken(): Promise<string> {
+  let attempt = 0;
+
+  for (;;) {
+    const resolved = await resolveToken();
+    if (resolved) {
+      log.info({ source: resolved.source }, "Token Telegram ditemukan");
+      return resolved.token;
+    }
+
+    if (attempt === 0 || attempt % 6 === 0) {
+      log.warn("Token Telegram belum dikonfigurasi; worker menunggu konfigurasi /setup");
+    }
+    attempt += 1;
+    await new Promise((resolve) => setTimeout(resolve, TOKEN_RETRY_MS));
+  }
+}
+
+async function main() {
+  const token = await waitForToken();
   const bot = new Bot(token);
 
   async function askAgent(externalId: string, message: string): Promise<string> {
@@ -160,11 +191,9 @@ if (!token) {
       return;
     }
 
-    const approveMatch = ctx.message.text.match(/^(approve|reject)\s+([a-zA-Z0-9]+)$/i);
-    if (approveMatch) {
-      await ctx.reply(
-        await confirmLogin(approveMatch[1].toLowerCase() as "approve" | "reject", approveMatch[2]),
-      );
+    const confirmation = parseTelegramAccessConfirmation(ctx.message.text);
+    if (confirmation) {
+      await ctx.reply(await confirmLogin(confirmation.action, confirmation.code));
       return;
     }
 
@@ -188,7 +217,15 @@ if (!token) {
     else log.error(e);
   });
 
-  bot.start({
+  // Long polling and webhooks are mutually exclusive. A stale webhook from an
+  // earlier deployment otherwise makes the bot appear completely silent.
+  await bot.api.deleteWebhook({ drop_pending_updates: false });
+  await bot.start({
     onStart: (info) => log.info(`Telegram bot @${info.username} started`),
   });
 }
+
+main().catch((err) => {
+  log.fatal({ err }, "Telegram worker berhenti");
+  process.exitCode = 1;
+});

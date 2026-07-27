@@ -129,7 +129,7 @@ Telegram worker (Grammy)
 | Build Prisma / `DATABASE_URL` | Build pakai dummy URL; Neon hanya di **runtime**. Pastikan `.env` benar. |
 | `DATABASE_URL` ditolak script | Jangan pakai host `postgres` Docker — wajib Neon. |
 | Installer berhenti di Certbot | Pastikan DNS A/AAAA sudah ke VPS, lalu ulangi `bash ./install.sh`. Installer tidak akan mengklaim sukses tanpa HTTPS. |
-| `/approve` bot diam | Isi token di `/setup`, `./deploy.sh`, cek `./scripts/logs.sh telegram-worker` |
+| `/approve` bot diam | Jalankan `./deploy.sh`, lalu cek `./scripts/logs.sh telegram-worker`. Worker membaca token dari `.env` atau `/setup`. |
 | Port bentrok | `APP_PORT=7341 ./deploy.sh` |
 
 Detail tambahan: [SELF_HOST.md](./SELF_HOST.md) · fitur produk: [README.md](./README.md)

@@ -55,7 +55,8 @@ const apps = [
     watch: false,
     max_memory_restart: "768M",
     kill_timeout: 5000,
-    env: sharedEnv,
+    // The dedicated worker is the only Telegram long-polling process.
+    env: { ...sharedEnv, TELEGRAM_EMBEDDED: "0" },
     error_file: "logs/pm2-web-error.log",
     out_file: "logs/pm2-web-out.log",
     merge_logs: true,
@@ -81,26 +82,25 @@ const apps = [
   },
 ];
 
-// Telegram hanya jika token ada — hindari crash-loop
-if (sharedEnv.TELEGRAM_BOT_TOKEN && String(sharedEnv.TELEGRAM_BOT_TOKEN).length > 10) {
-  apps.push({
-    name: "ledgerly-telegram",
-    script: "workers/telegram/index.ts",
-    interpreter: "node",
-    interpreterArgs: "--import tsx",
-    cwd: __dirname,
-    instances: 1,
-    exec_mode: "fork",
-    watch: false,
-    autorestart: true,
-    max_restarts: 50,
-    restart_delay: 3000,
-    env: sharedEnv,
-    error_file: "logs/pm2-telegram-error.log",
-    out_file: "logs/pm2-telegram-out.log",
-    merge_logs: true,
-    time: true,
-  });
-}
+// Always start the receiver. It waits for a token from .env or AppConfig, so
+// configuring Telegram through /setup does not require changing PM2 topology.
+apps.push({
+  name: "ledgerly-telegram",
+  script: "workers/telegram/index.ts",
+  interpreter: "node",
+  interpreterArgs: "--import tsx",
+  cwd: __dirname,
+  instances: 1,
+  exec_mode: "fork",
+  watch: false,
+  autorestart: true,
+  max_restarts: 50,
+  restart_delay: 3000,
+  env: sharedEnv,
+  error_file: "logs/pm2-telegram-error.log",
+  out_file: "logs/pm2-telegram-out.log",
+  merge_logs: true,
+  time: true,
+});
 
 module.exports = { apps };

@@ -1,5 +1,6 @@
 import { Bot, GrammyError, HttpError } from "grammy";
 import { prisma } from "../lib/db";
+import { parseTelegramAccessConfirmation } from "./telegram-access-command";
 
 async function resolveToken(): Promise<string | null> {
   const fromEnv = process.env.TELEGRAM_BOT_TOKEN?.trim();
@@ -87,16 +88,9 @@ export async function startEmbeddedTelegramBot() {
     const text = ctx.message.text.trim();
     if (text.startsWith("/")) return;
 
-    const approveMatch = text.match(/^(approve|reject)\s+([a-zA-Z0-9]+)$/i);
-    if (approveMatch) {
-      await ctx.reply(
-        await confirmAccess(approveMatch[1].toLowerCase() as "approve" | "reject", approveMatch[2]),
-      );
-      return;
-    }
-
-    if (/^[a-fA-F0-9]{6}$/.test(text)) {
-      await ctx.reply(await confirmAccess("approve", text));
+    const confirmation = parseTelegramAccessConfirmation(text);
+    if (confirmation) {
+      await ctx.reply(await confirmAccess(confirmation.action, confirmation.code));
       return;
     }
 
