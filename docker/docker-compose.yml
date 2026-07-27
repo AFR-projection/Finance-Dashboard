@@ -111,6 +111,8 @@ services:
         condition: service_healthy
     networks:
       - ledgerly_net
+    # Baileys 7 + whatsapp-rust-bridge are ESM-only. The nested worker
+    # package.json marks this TypeScript entrypoint as ESM for tsx.
     entrypoint: ["npx", "tsx", "workers/whatsapp/index.ts"]
     logging: *default-logging
 
