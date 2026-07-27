@@ -61,6 +61,15 @@ export async function PUT(request: Request) {
           });
         }
         if (owner.whatsappOwnerPhone) {
+          // Retire links for a previously registered number so it can no longer
+          // drive the account after the owner switches phones.
+          await prisma.channelLink.deleteMany({
+            where: {
+              channel: "WHATSAPP",
+              userId,
+              externalId: { not: owner.whatsappOwnerPhone },
+            },
+          });
           await prisma.channelLink.upsert({
             where: {
               channel_externalId: {

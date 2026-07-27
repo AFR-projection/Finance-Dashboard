@@ -1,5 +1,8 @@
 import makeWASocket, {
   DisconnectReason,
+  isLidUser,
+  jidDecode,
+  jidNormalizedUser,
   useMultiFileAuthState,
   type WASocket,
 } from "@whiskeysockets/baileys";
@@ -7,11 +10,13 @@ import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import pino from "pino";
 import { Boom } from "@hapi/boom";
-import { loadEnvConfig } from "@next/env";
+// workers/whatsapp/package.json marks this dir as ESM; @next/env is CJS and
+// only exposes its members through the default export under that loader.
+import nextEnv from "@next/env";
 import fs from "fs";
 import path from "path";
 
-loadEnvConfig(process.cwd());
+nextEnv.loadEnvConfig(process.cwd());
 
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
@@ -109,6 +114,24 @@ async function processMessage(externalId: string, text: string): Promise<string>
   }
 }
 
+/**
+ * Baileys 7 addresses many chats by LID (`123@lid`) rather than by phone
+ * number, and that opaque id is not what the owner registered. Resolve it back
+ * to the real number so any country/operator can be matched downstream.
+ */
+async function resolveSenderPhone(sock: WASocket, jid: string): Promise<string> {
+  if (isLidUser(jid)) {
+    try {
+      const pn = await sock.signalRepository.lidMapping.getPNForLID(jidNormalizedUser(jid));
+      return pn ? jidDecode(pn)?.user ?? "" : "";
+    } catch (err) {
+      log.warn({ err, jid }, "LID to phone number lookup failed");
+      return "";
+    }
+  }
+  return jidDecode(jid)?.user ?? "";
+}
+
 async function startSock(): Promise<WASocket> {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
   // eslint-disable-next-line react-hooks/rules-of-hooks
@@ -174,7 +197,11 @@ async function startSock(): Promise<WASocket> {
 
       if (!text.trim()) continue;
 
-      const phone = jid.replace(/@.*/, "");
+      const phone = await resolveSenderPhone(sock, jid);
+      if (!phone) {
+        log.warn({ jid }, "Could not resolve sender phone number");
+        continue;
+      }
       log.info({ phone }, "Incoming WhatsApp message");
 
       try {

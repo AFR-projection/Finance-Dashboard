@@ -3,6 +3,7 @@ import { z } from "zod";
 import { runFinanceAgent } from "@/ai/agent";
 import { resolveAiConfig } from "@/ai/resolve-config";
 import { prisma } from "@/lib/db";
+import { phonesMatch } from "@/lib/phone";
 import { rateLimit } from "@/lib/rate-limit";
 
 const payloadSchema = z.object({
@@ -10,6 +11,20 @@ const payloadSchema = z.object({
   externalId: z.string().min(1),
   message: z.string().min(1).max(4000),
 });
+
+/**
+ * WhatsApp reports the sender in full E.164, but an owner may have saved their
+ * number nationally (`0812…`) or without a dial code, so an exact lookup misses.
+ */
+async function findChannelLink(channel: "WHATSAPP" | "TELEGRAM", externalId: string) {
+  const exact = await prisma.channelLink.findUnique({
+    where: { channel_externalId: { channel, externalId } },
+  });
+  if (exact || channel !== "WHATSAPP") return exact;
+
+  const candidates = await prisma.channelLink.findMany({ where: { channel, isActive: true } });
+  return candidates.find((candidate) => phonesMatch(candidate.externalId, externalId)) ?? null;
+}
 
 export async function POST(request: Request) {
   const secret = request.headers.get("x-worker-secret");
@@ -25,14 +40,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "Rate limited" }, { status: 429 });
     }
 
-    const link = await prisma.channelLink.findUnique({
-      where: {
-        channel_externalId: {
-          channel: body.channel,
-          externalId: body.externalId,
-        },
-      },
-    });
+    const link = await findChannelLink(body.channel, body.externalId);
 
     if (!link || !link.isActive) {
       return NextResponse.json({
