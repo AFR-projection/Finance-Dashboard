@@ -5,13 +5,13 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
-type Msg = { role: "user" | "assistant"; text: string; tools?: string[] };
+type Msg = { role: "user" | "assistant"; text: string };
 
 export default function AgentPage() {
   const [messages, setMessages] = useState<Msg[]>([
     {
       role: "assistant",
-      text: 'Halo! Kirim saja "beli kopi 25 ribu" atau "berapa pengeluaran minggu ini?"',
+      text: 'Halo! Saya siap membantu mencatat transaksi dan menganalisis keuangan Anda. Coba kirim "beli kopi 25 ribu" atau "bagaimana kondisi keuangan bulan ini?"',
     },
   ]);
   const [input, setInput] = useState("");
@@ -36,11 +36,13 @@ export default function AgentPage() {
         {
           role: "assistant",
           text: json.data?.text ?? json.error?.message ?? "Gagal memproses.",
-          tools: json.data?.toolsUsed,
         },
       ]);
     } catch {
-      setMessages((m) => [...m, { role: "assistant", text: "Network error." }]);
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", text: "Koneksi bermasalah. Silakan coba lagi sebentar lagi." },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -50,7 +52,9 @@ export default function AgentPage() {
     <div className="mx-auto flex h-[calc(100vh-6rem)] max-w-3xl flex-col">
       <div className="mb-4">
         <h1 className="font-[family-name:var(--font-display)] text-4xl text-primary">AI Agent</h1>
-        <p className="text-muted-foreground">Natural language → Finance Engine → database.</p>
+        <p className="text-muted-foreground">
+          Catat transaksi, pahami arus kas, dan susun langkah keuangan berikutnya.
+        </p>
       </div>
 
       <div className="flex-1 space-y-3 overflow-y-auto rounded-xl border border-border/60 bg-white/60 p-4">
@@ -65,13 +69,10 @@ export default function AgentPage() {
                 : "bg-white text-foreground shadow-sm"
             }`}
           >
-            <p>{m.text}</p>
-            {m.tools && m.tools.length > 0 && (
-              <p className="mt-2 text-xs opacity-70">Tools: {m.tools.join(", ")}</p>
-            )}
+            <p className="whitespace-pre-wrap">{m.text}</p>
           </motion.div>
         ))}
-        {loading && <p className="text-sm text-muted-foreground">Thinking...</p>}
+        {loading && <p className="text-sm text-muted-foreground">Menganalisis...</p>}
       </div>
 
       <form onSubmit={onSubmit} className="mt-4 flex gap-2">
@@ -82,7 +83,7 @@ export default function AgentPage() {
           className="min-h-[52px] resize-none bg-white"
         />
         <Button type="submit" disabled={loading}>
-          Send
+          Kirim
         </Button>
       </form>
     </div>

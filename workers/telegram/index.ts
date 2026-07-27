@@ -1,7 +1,10 @@
 import { Bot, GrammyError, HttpError } from "grammy";
+import { loadEnvConfig } from "@next/env";
 import pino from "pino";
 import { prisma } from "../../src/lib/db";
 import { parseTelegramAccessConfirmation } from "../../src/messaging/telegram-access-command";
+
+loadEnvConfig(process.cwd());
 
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";

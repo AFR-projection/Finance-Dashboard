@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "tsx server.ts",
+    "dev": "tsx scripts/dev.ts",
+    "dev:web": "tsx server.ts",
     "dev:next": "next dev",
     "setup:local": "npm install --legacy-peer-deps && node -e \"const fs=require('fs'); if(!fs.existsSync('.env')){fs.copyFileSync('.env.local.example','.env'); console.log('Created .env from .env.local.example')} else {console.log('.env exists')}\"",
     "build": "prisma generate && next build",

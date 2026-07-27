@@ -108,10 +108,17 @@ export async function startEmbeddedTelegramBot() {
 
   try {
     await bot.api.deleteWebhook({ drop_pending_updates: false });
-    bot.start({
+    await bot.start({
       onStart: (info) => console.log(`[telegram] embedded bot @${info.username} listening`),
     });
   } catch (err) {
+    if (err instanceof GrammyError && err.error_code === 409) {
+      console.error(
+        "[telegram] polling conflict: token ini sedang dipakai instance lain. " +
+          "Hentikan worker lain atau set TELEGRAM_EMBEDDED=0.",
+      );
+      return;
+    }
     console.error("[telegram] failed to start embedded bot:", err);
   }
 }

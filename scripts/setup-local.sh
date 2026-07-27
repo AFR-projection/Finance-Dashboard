@@ -25,5 +25,5 @@ echo
 echo "Lanjut:"
 echo "  1) Edit .env isi DATABASE_URL dari Neon"
 echo "  2) npx prisma db push"
-echo "  3) npm run dev"
-echo "  4) Buka http://localhost:3000"
+echo "  3) npm run dev       # web + Telegram worker + WhatsApp worker"
+echo "  4) Buka http://localhost:3000/settings lalu scan QR sender WhatsApp"

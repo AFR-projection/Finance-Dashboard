@@ -7,8 +7,11 @@ import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import pino from "pino";
 import { Boom } from "@hapi/boom";
+import { loadEnvConfig } from "@next/env";
 import fs from "fs";
 import path from "path";
+
+loadEnvConfig(process.cwd());
 
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";

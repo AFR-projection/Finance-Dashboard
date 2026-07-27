@@ -2,6 +2,7 @@ import { toolsForOpenAICompatible, type AgentToolName } from "./tools";
 import { executeToolsParallel } from "./tool-executor";
 import { appendHistory, loadHistory } from "./conversation-store";
 import { prisma } from "@/lib/db";
+import { buildFinanceAgentSystemPrompt } from "./finance-agent-prompt";
 
 export type AiRuntimeConfig = {
   provider: "OPENROUTER";
@@ -21,26 +22,25 @@ export type AgentMessage = {
   content: string;
 };
 
-const SYSTEM_PROMPT = `You are AI Finance Agent — a professional personal finance assistant for Indonesian users.
+const MAX_AGENT_ROUNDS = 4;
+const ALWAYS_MUTATING_TOOLS = new Set<AgentToolName>([
+  "createTransaction",
+  "updateTransaction",
+  "deleteTransaction",
+  "manageBudget",
+  "rememberFact",
+]);
 
-## RULES
-- Speak in Bahasa Indonesia or English. Reply naturally.
-- "25 ribu" = 25000, "7 juta" = 7000000.
-- NEVER invent data. Always call tools for reads/writes.
-- After tool calls, reply with clear confirmed numbers.
-- Be practical, non-judgmental, and action-oriented.
+function isMutatingToolCall(name: AgentToolName, args: Record<string, unknown>): boolean {
+  if (name === "manageGoal") return args.action === "create";
+  return ALWAYS_MUTATING_TOOLS.has(name);
+}
 
-## TIMEZONE
-The user's current local date is in USER CONTEXT below — use it, never the server date.
-- Omit transactionDate for "hari ini", "tadi", "barusan" (defaults to the user's today).
-- Only pass transactionDate (YYYY-MM-DD) for other days, e.g. "kemarin" = one day before the local date.
-
-## REASONING
-- Understand intent → select best tool → analyze results → answer.
-- "cek keuangan" = generateFinancialReport.
-- For coaching/advice, gather data via multiple tools first, then synthesize.
-- When multiple independent data points needed, call tools together.
-- After creating a transaction, mention the current balance if relevant.`;
+function incompleteAgentReply(writeAttempted: boolean): string {
+  return writeAttempted
+    ? "Proses perubahan data sudah dijalankan, tetapi saya gagal menyusun konfirmasi akhirnya. Periksa dashboard sebelum mencoba lagi agar transaksi tidak tercatat dua kali."
+    : "Permintaan data sudah diproses, tetapi saya belum bisa menyusun analisisnya. Silakan coba lagi sebentar lagi.";
+}
 
 function nowInTimezone(timezone: string): { isoDate: string; time: string; dayNameId: string } {
   const now = new Date();
@@ -130,10 +130,14 @@ async function runOpenRouter(params: {
   history: AgentMessage[];
 }): Promise<AgentReply> {
   const userContext = await loadUserContext(params.userId);
-  const systemPrompt = `${SYSTEM_PROMPT}\n\n## USER CONTEXT\n${userContext}`;
+  const systemPrompt = buildFinanceAgentSystemPrompt({
+    channel: params.channel,
+    userContext,
+  });
 
   const toolsUsed: string[] = [];
   const data: unknown[] = [];
+  let writeAttempted = false;
 
   type Msg = {
     role: "system" | "user" | "assistant" | "tool";
@@ -153,7 +157,7 @@ async function runOpenRouter(params: {
     ];
 
     try {
-      for (let round = 0; round < 3; round++) {
+      for (let round = 0; round < MAX_AGENT_ROUNDS; round++) {
         const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
           method: "POST",
           headers: {
@@ -167,6 +171,7 @@ async function runOpenRouter(params: {
             messages,
             tools: toolsForOpenAICompatible(),
             tool_choice: "auto",
+            temperature: 0.2,
           }),
         });
 
@@ -193,7 +198,9 @@ async function runOpenRouter(params: {
             toolsUsed.push(call.function.name);
             let args: Record<string, unknown> = {};
             try { args = JSON.parse(call.function.arguments || "{}"); } catch { args = {}; }
-            return { name: call.function.name as AgentToolName, args: { ...args, rawInput: params.message } };
+            const name = call.function.name as AgentToolName;
+            if (isMutatingToolCall(name, args)) writeAttempted = true;
+            return { name, args: { ...args, rawInput: params.message } };
           });
 
           const results = await executeToolsParallel(params.userId, toolCalls, params.channel);
@@ -207,13 +214,18 @@ async function runOpenRouter(params: {
         return { text: msg.content || "Selesai.", toolsUsed, data };
       }
 
-      return { text: "Permintaan terlalu kompleks. Coba pecah pesan.", toolsUsed, data };
+      return { text: incompleteAgentReply(writeAttempted), toolsUsed, data };
     } catch (error) {
       lastError = error instanceof Error ? error.message : "Unknown";
       // Tool sudah menulis ke database — mencoba model lain akan menjalankannya ulang.
       if (toolsUsed.length > 0) {
+        console.error("[finance-agent] Provider failed after tool execution", {
+          model: currentModel,
+          toolsUsed,
+          error: lastError,
+        });
         return {
-          text: `Data sudah tersimpan, tapi saya gagal menyusun balasan. (${lastError})`,
+          text: incompleteAgentReply(writeAttempted),
           toolsUsed,
           data,
         };
@@ -221,7 +233,12 @@ async function runOpenRouter(params: {
     }
   }
 
-  return { text: `Maaf, terjadi kesalahan: ${lastError}. Coba lagi.`, toolsUsed, data };
+  console.error("[finance-agent] All provider models failed", { error: lastError });
+  return {
+    text: "Maaf, layanan analisis keuangan sedang tidak tersedia. Data Anda tidak diubah; silakan coba lagi sebentar lagi.",
+    toolsUsed,
+    data,
+  };
 }
 
 function buildModelChain(config: AiRuntimeConfig): { primary: string; fallbacks: string[] } {

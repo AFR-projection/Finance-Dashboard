@@ -109,7 +109,10 @@ npm run db:seed
 npm run dev
 ```
 
-Open http://localhost:3000 → Register → Settings (AI key).
+Perintah ini menjalankan web, Telegram worker, dan WhatsApp worker sekaligus. Untuk web saja,
+gunakan `npm run dev:web`.
+
+Open http://localhost:3000 → Register → Settings (AI key + QR sender WhatsApp).
 
 ### Cara menambah / menghubungkan sender WhatsApp (Baileys)
 
@@ -119,9 +122,9 @@ WhatsApp **bukan** seperti BotFather. “Bot”-nya = **nomor HP yang kamu scan 
    - `WHATSAPP_WORKER_SECRET` (sama dengan yang dipakai app)
    - `NEXT_PUBLIC_APP_URL=http://localhost:3000`
    - `WHATSAPP_AUTH_DIR=./workers/.wa-auth`
-2. Pastikan app sudah jalan (`npm run dev`).
-3. Jalankan `npm run worker:whatsapp`.
-4. **QR muncul di terminal** → buka WhatsApp di HP → Linked Devices → Link a device → scan.
+2. Jalankan `npm run dev` agar app dan worker aktif bersama.
+3. Buka Settings → **WhatsApp Sender (Baileys)**.
+4. **QR muncul di Settings dan terminal** → buka WhatsApp di HP → Linked Devices → Link a device → scan.
 5. Session tersimpan di `workers/.wa-auth` (jangan dihapus; ini biar tidak logout terus).
 6. Di dashboard → **Channels** → Generate pairing code.
 7. Dari HP **lain** (atau kontak kamu), kirim chat ke nomor yang baru di-link:

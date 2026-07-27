@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { WhatsAppSenderCard } from "@/components/settings/whatsapp-sender-card";
 import { toast } from "sonner";
 
 export default function SettingsPage() {
@@ -140,8 +141,8 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle>Owner & Bot</CardTitle>
           <CardDescription>
-            Status: Telegram {hasTelegram ? "✓" : "—"} · WhatsApp {hasWhatsApp ? "✓" : "—"} ·
-            minimal satu harus aktif agar web bisa dibuka.
+            Status konfigurasi: Telegram {hasTelegram ? "✓" : "—"} · nomor owner WhatsApp{" "}
+            {hasWhatsApp ? "✓" : "—"}. Koneksi sender WhatsApp ditampilkan terpisah di bawah.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -167,17 +168,23 @@ export default function SettingsPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>WhatsApp owner phone</Label>
+              <Label>Nomor WhatsApp owner (pengguna)</Label>
               <Input
                 value={whatsappOwnerPhone}
                 onChange={(e) => setWhatsappOwnerPhone(e.target.value)}
                 placeholder="62812..."
               />
+              <p className="text-xs text-muted-foreground">
+                Nomor pribadi yang akan mengirim perintah ke sender. Format internasional tanpa +,
+                dan sebaiknya berbeda dari nomor sender.
+              </p>
             </div>
             <Button type="submit">Simpan owner / bot</Button>
           </form>
         </CardContent>
       </Card>
+
+      <WhatsAppSenderCard ownerPhone={whatsappOwnerPhone} />
     </div>
   );
 }
