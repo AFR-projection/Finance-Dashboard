@@ -36,6 +36,9 @@ backup_env
 
 step "Pull kode..."
 if [[ "$DO_PULL" -eq 1 && -d .git ]]; then
+  # install.sh memastikan semua helper executable. Abaikan hanya perbedaan mode
+  # tersebut agar git pull tidak gagal pada file yang isinya tidak berubah.
+  git config core.fileMode false 2>/dev/null || true
   git pull --ff-only || die "git pull gagal. Perbaiki konflik/koneksi, atau pilih eksplisit: ./update.sh --no-pull"
   ok "git pull OK"
 else

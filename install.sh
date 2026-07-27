@@ -20,6 +20,9 @@ ROOT_DIR="$(pwd)"
 
 # The repository may be cloned from a filesystem that does not preserve mode bits.
 chmod +x install.sh deploy.sh update.sh redeploy.sh scripts/*.sh docker/entrypoint.sh
+# Runtime chmod di atas tidak boleh membuat working tree deployment tampak dirty.
+# Isi file tetap dilacak; hanya perbedaan executable bit yang diabaikan.
+git config core.fileMode false 2>/dev/null || true
 
 export TOTAL_STEPS=9
 # shellcheck disable=SC1091
