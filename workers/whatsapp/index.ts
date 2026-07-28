@@ -27,6 +27,8 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 const WORKER_SECRET = process.env.WHATSAPP_WORKER_SECRET || "";
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "workers", ".wa-auth");
 const CONFIGURED_OWNER_USER_ID = process.env.WHATSAPP_OWNER_USER_ID || "";
+/** Baileys closes and reopens often; reconnecting instantly just spins the CPU. */
+const RECONNECT_DELAY_MS = 3000;
 let resolvedOwnerUserId = CONFIGURED_OWNER_USER_ID;
 
 if (!WORKER_SECRET) {
@@ -55,9 +57,15 @@ async function syncSession(patch: {
   sessionData?: string | null;
 }) {
   const ownerUserId = await getOwnerUserId();
-  if (!ownerUserId) return;
+  if (!ownerUserId) {
+    // Silence here is what makes the dashboard sit on "QR belum tersedia"
+    // forever, so say why. Baileys re-emits the QR, so this recovers by itself
+    // once the web app is reachable.
+    log.warn({ APP_URL }, "Owner belum bisa dibaca dari web; QR tidak bisa ditampilkan di dashboard");
+    return;
+  }
   try {
-    await fetch(`${APP_URL}/api/channels/whatsapp-session`, {
+    const res = await fetch(`${APP_URL}/api/channels/whatsapp-session`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -65,6 +73,9 @@ async function syncSession(patch: {
       },
       body: JSON.stringify({ userId: ownerUserId, ...patch }),
     });
+    if (!res.ok) {
+      log.warn({ status: res.status }, "Web menolak sinkronisasi sesi WhatsApp");
+    }
   } catch (err) {
     log.warn({ err }, "Failed to sync WhatsApp session metadata");
   }
@@ -153,6 +164,24 @@ async function resolveSenderPhone(sock: WASocket, jid: string): Promise<string> 
   return jidDecode(jid)?.user ?? "";
 }
 
+/**
+ * A revoked session (unlinking the device from the phone) makes every reconnect
+ * fail with 401 and no QR is ever produced again. The stale credentials are
+ * moved aside rather than deleted so a mistaken reset can still be undone.
+ */
+function retireRevokedAuth() {
+  const retired = `${AUTH_DIR}.revoked`;
+  try {
+    fs.rmSync(retired, { recursive: true, force: true });
+    fs.renameSync(AUTH_DIR, retired);
+    log.warn({ retired }, "Sesi WhatsApp dicabut dari HP; kredensial lama dipindahkan");
+  } catch (err) {
+    log.error({ err }, "Gagal memindahkan kredensial WhatsApp yang sudah dicabut");
+    fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+  }
+  fs.mkdirSync(AUTH_DIR, { recursive: true });
+}
+
 async function startSock(): Promise<WASocket> {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
   // eslint-disable-next-line react-hooks/rules-of-hooks
@@ -173,22 +202,25 @@ async function startSock(): Promise<WASocket> {
       qrcode.generate(qr, { small: true });
       try {
         const dataUrl = await QRCode.toDataURL(qr);
-        await syncSession({ isConnected: false, lastQr: dataUrl });
+        // Written before the sync so a web app that is down cannot cost us the QR.
         fs.writeFileSync(path.join(AUTH_DIR, "last-qr.txt"), dataUrl);
+        await syncSession({ isConnected: false, lastQr: dataUrl });
       } catch (err) {
         log.warn({ err }, "QR encode failed");
       }
     }
     if (connection === "close") {
       const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      log.warn({ statusCode, shouldReconnect }, "WhatsApp connection closed");
-      await syncSession({ isConnected: false });
-      if (shouldReconnect) {
-        startSock().catch((err) => log.error(err));
-      } else {
-        log.error("Logged out - delete auth dir and restart to get a new QR");
-      }
+      const loggedOut = statusCode === DisconnectReason.loggedOut;
+      log.warn({ statusCode, loggedOut }, "WhatsApp connection closed");
+      await syncSession({ isConnected: false, phoneNumber: null, ...(loggedOut ? { lastQr: null } : {}) });
+
+      // Reconnecting with revoked credentials just fails with 401 forever, so
+      // clear them first and let the fresh socket emit a new QR.
+      if (loggedOut) retireRevokedAuth();
+      setTimeout(() => {
+        startSock().catch((err) => log.error({ err }, "Gagal menyambung ulang WhatsApp"));
+      }, RECONNECT_DELAY_MS);
     } else if (connection === "open") {
       log.info("WhatsApp connected");
       const phone = sock.user?.id?.replace(/:.*/, "").replace(/@.*/, "") ?? null;
