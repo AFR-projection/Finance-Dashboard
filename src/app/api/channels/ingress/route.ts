@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { phonesMatch } from "@/lib/phone";
 import { rateLimit } from "@/lib/rate-limit";
 import { settlePendingWalletReply } from "@/messaging/settle-wallet-reply";
+import { appendHistory } from "@/ai/conversation-store";
 
 const payloadSchema = z.object({
   channel: z.enum(["WHATSAPP", "TELEGRAM"]),
@@ -65,6 +66,10 @@ export async function POST(request: Request) {
       reply: body.message,
     });
     if (settled) {
+      await appendHistory(link.userId, body.channel, [
+        { role: "user", content: body.message },
+        { role: "assistant", content: settled },
+      ]);
       return NextResponse.json({ ok: true, data: { text: settled, toolsUsed: [] } });
     }
 

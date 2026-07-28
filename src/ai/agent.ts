@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { isWalletPromptResult } from "@/messaging/wallet-prompt";
 import type { WalletPrompt } from "@/messaging/wallet-choice";
 import { buildFinanceAgentSystemPrompt } from "./finance-agent-prompt";
+import { getClientMessage } from "./tool-result";
 
 export type AiRuntimeConfig = {
   provider: "OPENROUTER";
@@ -209,11 +210,29 @@ async function runOpenRouter(params: {
           });
 
           const results = await executeToolsParallel(params.userId, toolCalls, params.channel);
+          const clientMessages: string[] = [];
           for (let i = 0; i < results.length; i++) {
             const result = results[i].result;
             data.push(result);
             if (isWalletPromptResult(result)) walletPrompt = result.__walletPrompt;
+            const clientMessage = getClientMessage(result);
+            if (clientMessage) clientMessages.push(clientMessage);
             messages.push({ role: "tool", tool_call_id: msg.tool_calls[i].id, content: JSON.stringify(result) });
+          }
+          // This is a workflow state owned by the tool, not prose for the model
+          // to reinterpret. Stop immediately and let the channel render the
+          // exact account choices returned by the tool.
+          if (walletPrompt) {
+            return { text: walletPrompt.question, toolsUsed, data, walletPrompt };
+          }
+          // A pure transaction-write round already has authoritative receipts
+          // from the tool. Return them directly instead of paying for another
+          // model round that could paraphrase the saved facts incorrectly.
+          if (
+            toolCalls.every((call) => call.name === "createTransaction") &&
+            clientMessages.length === toolCalls.length
+          ) {
+            return { text: clientMessages.join("\n\n"), toolsUsed, data };
           }
           continue;
         }

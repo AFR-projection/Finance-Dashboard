@@ -26,6 +26,6 @@ export async function listActiveWalletChoices(userId: string) {
   return prisma.wallet.findMany({
     where: { userId, isActive: true },
     orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
-    select: { id: true, name: true, currency: true },
+    select: { id: true, name: true, currency: true, isDefault: true },
   });
 }

@@ -1,7 +1,7 @@
 export const agentTools = [
   {
     name: "createTransaction",
-    description: "Create income/expense. Convert IDR: 25ribu=25000, 7juta=7000000. Pass walletId to assign to a specific account/rekening.",
+    description: "Create income/expense. Convert IDR: 25ribu=25000, 7juta=7000000. The tool verifies the account from the raw user message; with multiple accounts and no explicit choice it pauses instead of using a default.",
     parameters: {
       type: "object",
       properties: {
@@ -11,7 +11,7 @@ export const agentTools = [
         description: { type: "string", description: "Short description" },
         paymentMethod: { type: "string", description: "cash/transfer/qris/card" },
         transactionDate: { type: "string", description: "YYYY-MM-DD. Omit for today — the server fills in the user's local date." },
-        walletId: { type: "string", description: "Wallet/rekening ID. Use manageWallet(list) first to resolve by name or currency." },
+        walletId: { type: "string", description: "Optional candidate wallet ID after manageWallet(list). The tool ignores model guesses and independently verifies the user's explicit account choice." },
       },
       required: ["type", "amount", "category", "description"],
     },

@@ -7,7 +7,7 @@ const TTL_MINUTES = 30;
 
 export type PendingTransactionDraft = {
   userId: string;
-  channel: "WHATSAPP" | "TELEGRAM";
+  channel: "WHATSAPP" | "TELEGRAM" | "WEB";
   type: "INCOME" | "EXPENSE";
   amount: number;
   category: string;
@@ -46,7 +46,7 @@ export async function purgeExpiredPendingTransactions() {
 
 export async function findLivePendingTransaction(
   userId: string,
-  channel: "WHATSAPP" | "TELEGRAM",
+  channel: "WHATSAPP" | "TELEGRAM" | "WEB",
 ) {
   return prisma.pendingTransaction.findFirst({
     where: { userId, channel, expiresAt: { gt: new Date() } },
@@ -63,9 +63,15 @@ export async function confirmPendingTransaction(params: {
   pendingId: string;
   userId: string;
   walletId: string;
+  channel?: "WHATSAPP" | "TELEGRAM" | "WEB";
 }) {
   const pending = await prisma.pendingTransaction.findFirst({
-    where: { id: params.pendingId, userId: params.userId, expiresAt: { gt: new Date() } },
+    where: {
+      id: params.pendingId,
+      userId: params.userId,
+      channel: params.channel,
+      expiresAt: { gt: new Date() },
+    },
   });
   if (!pending) return null;
 
@@ -79,7 +85,7 @@ export async function confirmPendingTransaction(params: {
     description: pending.description,
     paymentMethod: pending.paymentMethod ?? undefined,
     transactionDate: pending.transactionDate,
-    channel: pending.channel as "WHATSAPP" | "TELEGRAM",
+    channel: pending.channel,
     rawInput: pending.rawInput ?? undefined,
     walletId: params.walletId,
   });
@@ -87,7 +93,13 @@ export async function confirmPendingTransaction(params: {
   return transaction;
 }
 
-export async function cancelPendingTransaction(pendingId: string, userId: string) {
-  const deleted = await prisma.pendingTransaction.deleteMany({ where: { id: pendingId, userId } });
+export async function cancelPendingTransaction(
+  pendingId: string,
+  userId: string,
+  channel?: "WHATSAPP" | "TELEGRAM" | "WEB",
+) {
+  const deleted = await prisma.pendingTransaction.deleteMany({
+    where: { id: pendingId, userId, channel },
+  });
   return deleted.count > 0;
 }

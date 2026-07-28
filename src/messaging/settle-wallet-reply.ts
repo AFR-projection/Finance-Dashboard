@@ -17,7 +17,7 @@ import { listActiveWalletChoices } from "./wallet-prompt";
  */
 export async function settlePendingWalletReply(params: {
   userId: string;
-  channel: "WHATSAPP" | "TELEGRAM";
+  channel: "WHATSAPP" | "TELEGRAM" | "WEB";
   reply: string;
 }): Promise<string | null> {
   await purgeExpiredPendingTransactions();
@@ -30,7 +30,7 @@ export async function settlePendingWalletReply(params: {
   if (!choice) return null;
 
   if (!choice.walletId) {
-    await cancelPendingTransaction(pending.id, params.userId);
+    await cancelPendingTransaction(pending.id, params.userId, params.channel);
     return "Dibatalkan. Transaksi tidak dicatat.";
   }
 
@@ -41,6 +41,7 @@ export async function settlePendingWalletReply(params: {
     pendingId: pending.id,
     userId: params.userId,
     walletId: wallet.id,
+    channel: params.channel,
   });
   if (!transaction) return "Permintaan ini sudah diproses atau sudah kedaluwarsa.";
 

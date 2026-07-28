@@ -100,7 +100,7 @@ async function askAgent(externalId: string, message: string): Promise<string> {
   // WhatsApp has no interactive buttons for personal accounts, so the accounts
   // are offered as a numbered list the user answers in plain text.
   return json.data.walletPrompt
-    ? `${json.data.text}\n\n${walletPromptText(json.data.walletPrompt)}`
+    ? walletPromptText(json.data.walletPrompt)
     : json.data.text;
 }
 

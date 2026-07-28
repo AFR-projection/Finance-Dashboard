@@ -1,11 +1,14 @@
 import { FinanceEngine } from "@/finance-engine";
 import { daysAgo } from "@/lib/utils";
 import { createPendingTransaction } from "@/messaging/pending-transaction";
+import { recordedTransactionText } from "@/messaging/wallet-choice";
 import {
   WALLET_PROMPT_MARKER,
   listActiveWalletChoices,
   type WalletPromptToolResult,
 } from "@/messaging/wallet-prompt";
+import { resolveTransactionWallet } from "@/messaging/wallet-resolution";
+import { CLIENT_MESSAGE_MARKER } from "./tool-result";
 import type { AgentToolName } from "./tools";
 
 function nowInTimezone(timezone: string): {
@@ -98,25 +101,30 @@ export async function executeTool(
         const tz = await resolveUserTimezone(userId);
         const currentTime = nowInTimezone(tz);
         const date = resolveTransactionDate(args.transactionDate, currentTime.isoDate);
-        const walletId = args.walletId ? String(args.walletId) : undefined;
+        const wallets = await listActiveWalletChoices(userId);
+        const walletResolution = resolveTransactionWallet(wallets, args.rawInput);
+        const walletId =
+          walletResolution.status === "SELECTED" ? walletResolution.wallet.id : undefined;
 
-        if (!walletId) {
-          const wallets = await listActiveWalletChoices(userId);
+        if (walletResolution.status !== "SELECTED") {
 
-          // Every balance is derived from transactions, so a transaction with no
-          // account behind it can never be reflected anywhere. Refuse instead.
-          if (wallets.length === 0) {
+          // A walletId proposed by the model is not proof that the user chose
+          // it. The tool resolves the raw message itself and pauses ambiguous
+          // multi-account writes before they reach the finance engine.
+          if (walletResolution.status === "NO_WALLET") {
             return {
-              status: "NO_WALLET",
-              error:
-                "Belum ada rekening aktif. Transaksi tidak dicatat sampai user membuat minimal satu rekening.",
-              note: "Jangan catat transaksi ini. Minta user membuat rekening dulu (sebutkan nama bank, mata uang, dan saldo awal jika ada), lalu tawarkan untuk mencatat ulang transaksinya setelah rekening jadi.",
+            status: "NO_WALLET",
+            error:
+              "Belum ada rekening aktif. Transaksi tidak dicatat sampai user membuat minimal satu rekening.",
+            [CLIENT_MESSAGE_MARKER]:
+              "Transaksi belum dicatat karena belum ada rekening aktif. Buat rekening terlebih dahulu, lalu catat ulang transaksi ini.",
+            note: "Jangan catat transaksi ini. Minta user membuat rekening dulu (sebutkan nama bank, mata uang, dan saldo awal jika ada), lalu tawarkan untuk mencatat ulang transaksinya setelah rekening jadi.",
             };
           }
 
-          // Guessing between several accounts would silently move the wrong
-          // balance, so hold the draft and let the user choose.
-          if (wallets.length > 1 && channel !== "WEB") {
+          // Guessing between accounts would silently move the wrong balance, so
+          // hold the draft and let the user choose on every channel.
+          if (walletResolution.status === "NEEDS_CHOICE") {
             const pending = await createPendingTransaction({
               userId,
               channel,
@@ -135,15 +143,19 @@ export async function executeTool(
                 question: `${args.type === "INCOME" ? "Pemasukan" : "Pengeluaran"} ${String(
                   args.description ?? "",
                 )} — pilih rekening:`,
-                wallets,
+                wallets: walletResolution.wallets.map(({ id, name, currency }) => ({
+                  id,
+                  name,
+                  currency,
+                })),
               },
               status: "AWAITING_WALLET_CHOICE",
-              note: "Transaksi belum dicatat. Pilihan rekening sudah dikirim ke user beserta caranya memilih. Minta user memilih rekening, jangan sebut ulang daftar rekeningnya, dan jangan bilang transaksi sudah tercatat.",
+              note: "Transaksi belum dicatat. Tunggu pilihan rekening user; jangan menebak, mencoba ulang, atau menyatakan transaksi sudah tercatat.",
             } satisfies WalletPromptToolResult;
           }
         }
 
-        return FinanceEngine.createTransaction(userId, {
+        const transaction = await FinanceEngine.createTransaction(userId, {
           type: args.type as "INCOME" | "EXPENSE",
           amount: Number(args.amount),
           category: String(args.category ?? "Other"),
@@ -154,6 +166,17 @@ export async function executeTool(
           rawInput: args.rawInput ? String(args.rawInput) : undefined,
           walletId,
         });
+        return {
+          ...transaction,
+          [CLIENT_MESSAGE_MARKER]: recordedTransactionText({
+            type: transaction.type,
+            amount: transaction.amount,
+            walletName: transaction.wallet?.name ?? walletResolution.wallet.name,
+            currency: transaction.wallet?.currency ?? walletResolution.wallet.currency,
+            categoryName: transaction.category?.name ?? null,
+            description: transaction.description,
+          }),
+        };
       }
 
       case "getTransactions":

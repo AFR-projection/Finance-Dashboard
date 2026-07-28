@@ -9,6 +9,7 @@ import {
   purgeExpiredPendingTransactions,
 } from "@/messaging/pending-transaction";
 import { recordedTransactionText } from "@/messaging/wallet-choice";
+import { appendHistory } from "@/ai/conversation-store";
 
 const schema = z.object({
   channel: z.enum(["WHATSAPP", "TELEGRAM"]),
@@ -50,14 +51,19 @@ export async function POST(request: Request) {
     await purgeExpiredPendingTransactions();
 
     if (body.action === "cancel") {
-      const cancelled = await cancelPendingTransaction(body.pendingId, link.userId);
+      const cancelled = await cancelPendingTransaction(body.pendingId, link.userId, body.channel);
+      const text = cancelled
+        ? "Dibatalkan. Transaksi tidak dicatat."
+        : "Permintaan ini sudah tidak berlaku.";
+      if (cancelled) {
+        await appendHistory(link.userId, body.channel, [
+          { role: "user", content: "Batalkan transaksi" },
+          { role: "assistant", content: text },
+        ]);
+      }
       return NextResponse.json({
         ok: true,
-        data: {
-          text: cancelled
-            ? "Dibatalkan. Transaksi tidak dicatat."
-            : "Permintaan ini sudah tidak berlaku.",
-        },
+        data: { text },
       });
     }
 
@@ -77,6 +83,7 @@ export async function POST(request: Request) {
       pendingId: body.pendingId,
       userId: link.userId,
       walletId: body.walletId,
+      channel: body.channel,
     });
 
     if (!transaction) {
@@ -86,19 +93,19 @@ export async function POST(request: Request) {
       });
     }
 
-    return NextResponse.json({
-      ok: true,
-      data: {
-        text: recordedTransactionText({
-          type: transaction.type,
-          amount: transaction.amount,
-          walletName: wallet.name,
-          currency: wallet.currency,
-          categoryName: transaction.category?.name ?? null,
-          description: transaction.description,
-        }),
-      },
+    const text = recordedTransactionText({
+      type: transaction.type,
+      amount: transaction.amount,
+      walletName: wallet.name,
+      currency: wallet.currency,
+      categoryName: transaction.category?.name ?? null,
+      description: transaction.description,
     });
+    await appendHistory(link.userId, body.channel, [
+      { role: "user", content: `Gunakan rekening ${wallet.name}` },
+      { role: "assistant", content: text },
+    ]);
+    return NextResponse.json({ ok: true, data: { text } });
   } catch (error) {
     console.error("[wallet-choice] error:", error);
     const status = error instanceof z.ZodError ? 400 : 500;

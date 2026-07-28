@@ -106,37 +106,26 @@ export async function ensureUserSettings(userId: string) {
 export async function createTransaction(userId: string, raw: CreateTransactionInput) {
   assertUser(userId);
   const input = createTransactionSchema.parse(raw);
-  await ensureDefaultCategories(userId);
+  if (!input.walletId) {
+    throw new FinanceEngineError(
+      "Pilih rekening sebelum mencatat transaksi.",
+      "WALLET_REQUIRED",
+      409,
+    );
+  }
+  const wallet = await prisma.wallet.findFirst({
+    where: { id: input.walletId, userId, isActive: true },
+  });
+  if (!wallet) throw new FinanceEngineError("Wallet not found", "WALLET_NOT_FOUND", 404);
+  const walletId = wallet.id;
 
+  await ensureDefaultCategories(userId);
   const categoryId = await resolveCategoryId(
     userId,
     input.type,
     input.category,
     input.categoryId,
   );
-
-  let walletId: string | null = null;
-  if (input.walletId) {
-    const wallet = await prisma.wallet.findFirst({ where: { id: input.walletId, userId, isActive: true } });
-    if (!wallet) throw new FinanceEngineError("Wallet not found", "WALLET_NOT_FOUND", 404);
-    walletId = wallet.id;
-  } else {
-    // A transaction with no account behind it cannot move any balance, so the
-    // ledger would silently disagree with every wallet total. Fall back to the
-    // default account, and refuse outright when the user has none.
-    const fallback = await prisma.wallet.findFirst({
-      where: { userId, isActive: true },
-      orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
-    });
-    if (!fallback) {
-      throw new FinanceEngineError(
-        "Belum ada rekening aktif. Buat minimal satu rekening sebelum mencatat transaksi.",
-        "NO_WALLET",
-        409,
-      );
-    }
-    walletId = fallback.id;
-  }
 
   const tx = await prisma.transaction.create({
     data: {

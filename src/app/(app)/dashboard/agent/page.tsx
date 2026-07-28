@@ -5,7 +5,13 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
-type Msg = { role: "user" | "assistant"; text: string };
+type WalletPrompt = {
+  pendingId: string;
+  question: string;
+  wallets: Array<{ id: string; name: string; currency: string }>;
+};
+
+type Msg = { role: "user" | "assistant"; text: string; walletPrompt?: WalletPrompt };
 
 export default function AgentPage() {
   const [messages, setMessages] = useState<Msg[]>([
@@ -36,12 +42,57 @@ export default function AgentPage() {
         {
           role: "assistant",
           text: json.data?.text ?? json.error?.message ?? "Gagal memproses.",
+          walletPrompt: json.data?.walletPrompt,
         },
       ]);
     } catch {
       setMessages((m) => [
         ...m,
         { role: "assistant", text: "Koneksi bermasalah. Silakan coba lagi sebentar lagi." },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function chooseWallet(
+    messageIndex: number,
+    prompt: WalletPrompt,
+    wallet: { id: string; name: string } | null,
+  ) {
+    if (loading) return;
+    setMessages((messages) => [
+      ...messages.map((message, index) =>
+        index === messageIndex ? { ...message, walletPrompt: undefined } : message,
+      ),
+      {
+        role: "user",
+        text: wallet ? `Gunakan rekening ${wallet.name}` : "Batalkan transaksi",
+      },
+    ]);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/agent/wallet-choice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pendingId: prompt.pendingId,
+          walletId: wallet?.id,
+          action: wallet ? "confirm" : "cancel",
+        }),
+      });
+      const json = await res.json();
+      setMessages((messages) => [
+        ...messages,
+        {
+          role: "assistant",
+          text: json.data?.text ?? json.error?.message ?? "Gagal memproses pilihan rekening.",
+        },
+      ]);
+    } catch {
+      setMessages((messages) => [
+        ...messages,
+        { role: "assistant", text: "Koneksi bermasalah. Pilihan rekening belum diproses." },
       ]);
     } finally {
       setLoading(false);
@@ -70,6 +121,31 @@ export default function AgentPage() {
             }`}
           >
             <p className="whitespace-pre-wrap">{m.text}</p>
+            {m.role === "assistant" && m.walletPrompt && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {m.walletPrompt.wallets.map((wallet) => (
+                  <Button
+                    key={wallet.id}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={loading}
+                    onClick={() => chooseWallet(i, m.walletPrompt!, wallet)}
+                  >
+                    {wallet.name} ({wallet.currency})
+                  </Button>
+                ))}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={loading}
+                  onClick={() => chooseWallet(i, m.walletPrompt!, null)}
+                >
+                  Batalkan
+                </Button>
+              </div>
+            )}
           </motion.div>
         ))}
         {loading && <p className="text-sm text-muted-foreground">Menganalisis...</p>}
