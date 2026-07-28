@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { emitToUser } from "@/lib/socket-server";
 
 const schema = z.object({
   userId: z.string().min(1),
@@ -24,7 +25,14 @@ export async function GET(request: Request) {
   if (!owner) {
     return NextResponse.json({ ok: false, error: "Owner belum setup" }, { status: 404 });
   }
-  return NextResponse.json({ ok: true, data: { userId: owner.id } });
+  const session = await prisma.whatsAppSession.findUnique({
+    where: { userId: owner.id },
+    select: { sessionData: true },
+  });
+  return NextResponse.json({
+    ok: true,
+    data: { userId: owner.id, command: session?.sessionData ?? null },
+  });
 }
 
 /** Internal: WhatsApp worker syncs connection metadata for dashboard QR display */
@@ -52,6 +60,7 @@ export async function POST(request: Request) {
         sessionData: body.sessionData ?? null,
       },
     });
+    emitToUser(body.userId, "whatsapp:session", session);
     return NextResponse.json({ ok: true, data: session });
   } catch (error) {
     console.error(error);

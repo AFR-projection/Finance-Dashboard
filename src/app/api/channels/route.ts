@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   return withApiGuard(request, async (userId) => {
     const links = await prisma.channelLink.findMany({ where: { userId } });
     const wa = await prisma.whatsAppSession.findUnique({ where: { userId } });
-    return jsonOk({ links, whatsapp: wa });
+    return jsonOk({ userId, links, whatsapp: wa });
   });
 }
 

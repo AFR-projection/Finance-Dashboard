@@ -60,8 +60,16 @@ export const agentTools = [
     },
   },
   {
+    name: "getFinancialSnapshot",
+    description: "Get the authoritative finance snapshot used for balance questions and general financial scans. Wallet balances exactly use the same all-time ledger source as the UI. Period net cash flow is explicitly separate, and currencies are never combined.",
+    parameters: {
+      type: "object",
+      properties: { days: { type: "number", description: "Cash-flow analysis period in days (default 30). Wallet balances always remain all-time ledger balances." } },
+    },
+  },
+  {
     name: "generateFinancialReport",
-    description: "Full report: income, expenses, top categories, trends, saving rate, health score, recommendations.",
+    description: "Period cash-flow report: income, expenses, net cash flow, top categories, trends, saving rate, health score, recommendations. Do not use this as an account balance.",
     parameters: {
       type: "object",
       properties: { days: { type: "number", description: "Period in days (default 30)" } },

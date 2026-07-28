@@ -29,7 +29,16 @@ const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), "work
 const CONFIGURED_OWNER_USER_ID = process.env.WHATSAPP_OWNER_USER_ID || "";
 /** Baileys closes and reopens often; reconnecting instantly just spins the CPU. */
 const RECONNECT_DELAY_MS = 3000;
+const CONTROL_POLL_MS = 2000;
+const CONNECTED_HEARTBEAT_MS = 5000;
+const PAIRING_COMMAND_PREFIX = "PAIR_QR:";
 let resolvedOwnerUserId = CONFIGURED_OWNER_USER_ID;
+let activeSock: WASocket | null = null;
+let restartTimer: ReturnType<typeof setTimeout> | null = null;
+let controlPollBusy = false;
+let lastHandledPairingCommand = "";
+let workerConnected = false;
+let connectedPhone: string | null = null;
 
 if (!WORKER_SECRET) {
   log.warn("WHATSAPP_WORKER_SECRET is empty - ingress calls will fail auth");
@@ -47,6 +56,25 @@ async function getOwnerUserId(): Promise<string> {
     return resolvedOwnerUserId;
   } catch {
     return "";
+  }
+}
+
+async function getWorkerControl(): Promise<{ userId: string; command: string | null } | null> {
+  try {
+    const res = await fetch(`${APP_URL}/api/channels/whatsapp-session`, {
+      headers: { "x-worker-secret": WORKER_SECRET },
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      data?: { userId?: string; command?: string | null };
+    };
+    const userId = json.data?.userId ?? "";
+    if (!userId) return null;
+    resolvedOwnerUserId = userId;
+    return { userId, command: json.data?.command ?? null };
+  } catch (err) {
+    log.debug({ err }, "Worker control belum bisa dibaca");
+    return null;
   }
 }
 
@@ -169,17 +197,63 @@ async function resolveSenderPhone(sock: WASocket, jid: string): Promise<string> 
  * fail with 401 and no QR is ever produced again. The stale credentials are
  * moved aside rather than deleted so a mistaken reset can still be undone.
  */
-function retireRevokedAuth() {
-  const retired = `${AUTH_DIR}.revoked`;
+function resetAuthState(reason: "revoked" | "fresh-pairing") {
+  const retired = `${AUTH_DIR}.previous`;
   try {
     fs.rmSync(retired, { recursive: true, force: true });
     fs.renameSync(AUTH_DIR, retired);
-    log.warn({ retired }, "Sesi WhatsApp dicabut dari HP; kredensial lama dipindahkan");
+    log.warn({ retired, reason }, "Kredensial WhatsApp lama dipindahkan");
   } catch (err) {
-    log.error({ err }, "Gagal memindahkan kredensial WhatsApp yang sudah dicabut");
+    log.error({ err, reason }, "Gagal memindahkan kredensial WhatsApp lama");
     fs.rmSync(AUTH_DIR, { recursive: true, force: true });
   }
   fs.mkdirSync(AUTH_DIR, { recursive: true });
+}
+
+function scheduleStart(delayMs = RECONNECT_DELAY_MS) {
+  if (restartTimer) clearTimeout(restartTimer);
+  restartTimer = setTimeout(() => {
+    restartTimer = null;
+    startSock().catch((err) => log.error({ err }, "Gagal menyambung WhatsApp"));
+  }, delayMs);
+}
+
+async function requestFreshPairing(command: string) {
+  if (command === lastHandledPairingCommand) return;
+  lastHandledPairingCommand = command;
+  log.info("Dashboard meminta QR WhatsApp baru");
+
+  const previousSock = activeSock;
+  activeSock = null;
+  if (previousSock) {
+    try {
+      previousSock.end(new Error("Fresh pairing requested"));
+    } catch {
+      // Socket may already be closing; the fresh auth state below is authoritative.
+    }
+  }
+
+  resetAuthState("fresh-pairing");
+  await syncSession({
+    isConnected: false,
+    lastQr: null,
+    phoneNumber: null,
+    sessionData: null,
+  });
+  scheduleStart(250);
+}
+
+async function pollWorkerControl() {
+  if (controlPollBusy) return;
+  controlPollBusy = true;
+  try {
+    const control = await getWorkerControl();
+    if (control?.command?.startsWith(PAIRING_COMMAND_PREFIX)) {
+      await requestFreshPairing(control.command);
+    }
+  } finally {
+    controlPollBusy = false;
+  }
 }
 
 async function startSock(): Promise<WASocket> {
@@ -192,10 +266,14 @@ async function startSock(): Promise<WASocket> {
     logger: pino({ level: "silent" }),
     printQRInTerminal: false,
   });
+  activeSock = sock;
 
-  sock.ev.on("creds.update", saveCreds);
+  sock.ev.on("creds.update", async () => {
+    if (activeSock === sock) await saveCreds();
+  });
 
   sock.ev.on("connection.update", async (update) => {
+    if (activeSock !== sock) return;
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
       log.info("Scan QR to connect WhatsApp");
@@ -210,6 +288,8 @@ async function startSock(): Promise<WASocket> {
       }
     }
     if (connection === "close") {
+      workerConnected = false;
+      connectedPhone = null;
       const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
       const loggedOut = statusCode === DisconnectReason.loggedOut;
       log.warn({ statusCode, loggedOut }, "WhatsApp connection closed");
@@ -217,13 +297,14 @@ async function startSock(): Promise<WASocket> {
 
       // Reconnecting with revoked credentials just fails with 401 forever, so
       // clear them first and let the fresh socket emit a new QR.
-      if (loggedOut) retireRevokedAuth();
-      setTimeout(() => {
-        startSock().catch((err) => log.error({ err }, "Gagal menyambung ulang WhatsApp"));
-      }, RECONNECT_DELAY_MS);
+      activeSock = null;
+      if (loggedOut) resetAuthState("revoked");
+      scheduleStart();
     } else if (connection === "open") {
       log.info("WhatsApp connected");
       const phone = sock.user?.id?.replace(/:.*/, "").replace(/@.*/, "") ?? null;
+      workerConnected = true;
+      connectedPhone = phone;
       await syncSession({ isConnected: true, lastQr: null, phoneNumber: phone });
     }
   });
@@ -277,5 +358,16 @@ async function startSock(): Promise<WASocket> {
 
 startSock().catch((err) => {
   log.error(err);
-  process.exit(1);
+  scheduleStart();
 });
+
+setInterval(() => {
+  void pollWorkerControl();
+}, CONTROL_POLL_MS);
+void pollWorkerControl();
+
+setInterval(() => {
+  if (workerConnected && activeSock) {
+    void syncSession({ isConnected: true, lastQr: null, phoneNumber: connectedPhone });
+  }
+}, CONNECTED_HEARTBEAT_MS);

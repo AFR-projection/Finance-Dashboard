@@ -144,7 +144,22 @@ export async function createTransaction(userId: string, raw: CreateTransactionIn
     include: { category: true, wallet: true },
   });
 
-  return serializeTransaction(tx);
+  // A successful response must be backed by a read-after-write receipt. This
+  // prevents the agent from confirming a write that is not visible to later UI
+  // reads from the same ledger.
+  const persisted = await prisma.transaction.findFirst({
+    where: { id: tx.id, userId, walletId },
+    include: { category: true, wallet: true },
+  });
+  if (!persisted) {
+    throw new FinanceEngineError(
+      "Transaction write could not be verified",
+      "TRANSACTION_NOT_PERSISTED",
+      500,
+    );
+  }
+
+  return serializeTransaction(persisted);
 }
 
 export async function updateTransaction(
@@ -704,6 +719,69 @@ export async function listWallets(userId: string) {
   );
 }
 
+type WalletBalance = Awaited<ReturnType<typeof listWallets>>[number];
+
+export function groupWalletBalancesByCurrency(wallets: WalletBalance[]) {
+  const totals = new Map<string, { currency: string; totalBalance: number; walletCount: number }>();
+  for (const wallet of wallets) {
+    const current = totals.get(wallet.currency) ?? {
+      currency: wallet.currency,
+      totalBalance: 0,
+      walletCount: 0,
+    };
+    current.totalBalance += wallet.balance;
+    current.walletCount += 1;
+    totals.set(wallet.currency, current);
+  }
+  return [...totals.values()];
+}
+
+/** Exact ledger snapshot shared with the dashboard's wallet balance source. */
+export async function getFinancialSnapshot(userId: string, days = 30) {
+  assertUser(userId);
+  const safeDays = Math.max(1, Math.min(365, Math.round(days || 30)));
+  const to = new Date();
+  const from = daysAgo(safeDays);
+  const [wallets, overview] = await Promise.all([
+    listWallets(userId),
+    getOverview(userId, from, to),
+  ]);
+
+  const assetsByCurrency = groupWalletBalancesByCurrency(wallets).sort((a, b) =>
+    a.currency === overview.currency
+      ? -1
+      : b.currency === overview.currency
+        ? 1
+        : a.currency.localeCompare(b.currency),
+  );
+  const cashflowByCurrency = overview.byCurrency.map(({ balance, ...item }) => ({
+    ...item,
+    netCashflow: balance,
+  }));
+
+  return {
+    generatedAt: to,
+    period: { from, to, days: safeDays },
+    primaryCurrency: overview.currency,
+    wallets,
+    assetsByCurrency,
+    cashflow: {
+      totalIncome: overview.totalIncome,
+      totalExpense: overview.totalExpense,
+      netCashflow: overview.balance,
+      savingRate: overview.savingRate,
+      healthScore: overview.healthScore,
+      expenseChangePct: overview.expenseChangePct,
+      topCategories: overview.topCategories,
+      byCurrency: cashflowByCurrency,
+    },
+    terminology: {
+      walletBalance: "Saldo ledger sepanjang waktu yang sama dengan nilai rekening di UI.",
+      netCashflow: "Pemasukan dikurangi pengeluaran hanya untuk periode snapshot; bukan saldo rekening.",
+    },
+  };
+}
+
 export async function updateWallet(userId: string, raw: UpdateWalletInput) {
   assertUser(userId);
   const input = updateWalletSchema.parse(raw);
@@ -773,6 +851,7 @@ export const FinanceEngine = {
   predictMonthEnd,
   createWallet,
   listWallets,
+  getFinancialSnapshot,
   updateWallet,
   deleteWallet,
 };

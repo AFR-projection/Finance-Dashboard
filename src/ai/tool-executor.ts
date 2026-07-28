@@ -8,7 +8,7 @@ import {
   type WalletPromptToolResult,
 } from "@/messaging/wallet-prompt";
 import { resolveTransactionWallet } from "@/messaging/wallet-resolution";
-import { CLIENT_MESSAGE_MARKER } from "./tool-result";
+import { CLIENT_MESSAGE_MARKER, VERIFIED_MUTATION_MARKER } from "./tool-result";
 import type { AgentToolName } from "./tools";
 
 function nowInTimezone(timezone: string): {
@@ -168,6 +168,11 @@ export async function executeTool(
         });
         return {
           ...transaction,
+          [VERIFIED_MUTATION_MARKER]: {
+            kind: "transaction.created",
+            entityId: transaction.id,
+            walletId: transaction.walletId ?? walletId,
+          },
           [CLIENT_MESSAGE_MARKER]: recordedTransactionText({
             type: transaction.type,
             amount: transaction.amount,
@@ -191,19 +196,30 @@ export async function executeTool(
       case "deleteTransaction": {
         const id = String(args.id ?? "");
         if (!id) return { error: "Transaction ID required" };
-        return FinanceEngine.deleteTransaction(userId, id);
+        const result = await FinanceEngine.deleteTransaction(userId, id);
+        return {
+          ...result,
+          [VERIFIED_MUTATION_MARKER]: { kind: "transaction.deleted", entityId: id },
+        };
       }
 
       case "updateTransaction": {
         const id = String(args.id ?? "");
         if (!id) return { error: "Transaction ID required" };
-        return FinanceEngine.updateTransaction(userId, id, {
+        const transaction = await FinanceEngine.updateTransaction(userId, id, {
           type: args.type as "INCOME" | "EXPENSE" | undefined,
           amount: args.amount != null ? Number(args.amount) : undefined,
           category: args.category ? String(args.category) : undefined,
           description: args.description ? String(args.description) : undefined,
         });
+        return {
+          ...transaction,
+          [VERIFIED_MUTATION_MARKER]: { kind: "transaction.updated", entityId: transaction.id },
+        };
       }
+
+      case "getFinancialSnapshot":
+        return FinanceEngine.getFinancialSnapshot(userId, Number(args.days ?? 30));
 
       case "generateFinancialReport":
         return FinanceEngine.generateFinancialReport(userId, Number(args.days ?? 30));
