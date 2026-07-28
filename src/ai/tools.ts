@@ -205,6 +205,11 @@ export const agentTools = [
         currency: { type: "string", description: "ISO 4217 code: IDR, USD, SGD, etc." },
         color: { type: "string", description: "Hex color, e.g. #0F766E" },
         isDefault: { type: "boolean", description: "Set as default wallet" },
+        initialBalance: {
+          type: "number",
+          description:
+            "Opening balance, in this wallet's own currency, exactly as the user stated it. For '100$' on a USD wallet pass 100 — never convert to another currency. Only for action=create.",
+        },
       },
       required: ["action"],
     },

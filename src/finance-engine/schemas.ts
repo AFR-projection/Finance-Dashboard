@@ -82,12 +82,17 @@ export const createWalletSchema = z.object({
   currency: z.string().length(3).toUpperCase(),
   color: z.string().optional(),
   isDefault: z.boolean().optional(),
+  /** Stated in the wallet's own currency — never converted. */
+  initialBalance: z.number().finite().min(0).optional(),
 });
 
-export const updateWalletSchema = createWalletSchema.partial().extend({
-  id: z.string().cuid(),
-  isActive: z.boolean().optional(),
-});
+export const updateWalletSchema = createWalletSchema
+  .omit({ initialBalance: true })
+  .partial()
+  .extend({
+    id: z.string().cuid(),
+    isActive: z.boolean().optional(),
+  });
 
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
 export type ListTransactionsInput = z.infer<typeof listTransactionsSchema>;

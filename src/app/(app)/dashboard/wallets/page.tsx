@@ -41,16 +41,24 @@ function formatBalance(amount: number, currency: string) {
   }
 }
 
-type WalletFormData = { name: string; currency: string; color: string; isDefault: boolean };
+type WalletFormData = {
+  name: string;
+  currency: string;
+  color: string;
+  isDefault: boolean;
+  initialBalance?: number;
+};
 
 function WalletForm({
   initial,
   onSubmit,
   loading,
+  showInitialBalance = false,
 }: {
   initial?: Partial<WalletFormData>;
   onSubmit: (data: WalletFormData) => void;
   loading: boolean;
+  showInitialBalance?: boolean;
 }) {
   const [form, setForm] = useState<WalletFormData>({
     name: initial?.name ?? "",
@@ -58,6 +66,7 @@ function WalletForm({
     color: initial?.color ?? "#0F766E",
     isDefault: initial?.isDefault ?? false,
   });
+  const [balanceText, setBalanceText] = useState("");
 
   return (
     <div className="space-y-4">
@@ -113,6 +122,21 @@ function WalletForm({
         </div>
       </div>
 
+      {showInitialBalance && (
+        <div className="space-y-1.5">
+          <Label>Saldo Awal (opsional)</Label>
+          <Input
+            inputMode="decimal"
+            placeholder={`Jumlah dalam ${form.currency}`}
+            value={balanceText}
+            onChange={(e) => setBalanceText(e.target.value.replace(/[^0-9.]/g, ""))}
+          />
+          <p className="text-xs text-muted-foreground">
+            Diisi dalam {form.currency}, tanpa konversi mata uang.
+          </p>
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         <input
           type="checkbox"
@@ -127,7 +151,14 @@ function WalletForm({
       <Button
         className="w-full"
         disabled={!form.name || form.currency.length !== 3 || loading}
-        onClick={() => onSubmit(form)}
+        onClick={() => {
+          const parsed = Number.parseFloat(balanceText);
+          onSubmit({
+            ...form,
+            initialBalance:
+              showInitialBalance && Number.isFinite(parsed) && parsed > 0 ? parsed : undefined,
+          });
+        }}
       >
         {loading ? "Menyimpan..." : "Simpan"}
       </Button>
@@ -202,7 +233,7 @@ export default function WalletsPage() {
             <DialogHeader>
               <DialogTitle>Rekening Baru</DialogTitle>
             </DialogHeader>
-            <WalletForm onSubmit={handleCreate} loading={submitting} />
+            <WalletForm onSubmit={handleCreate} loading={submitting} showInitialBalance />
           </DialogContent>
         </Dialog>
       </div>

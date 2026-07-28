@@ -2,6 +2,7 @@ import { toolsForOpenAICompatible, type AgentToolName } from "./tools";
 import { executeToolsParallel } from "./tool-executor";
 import { appendHistory, loadHistory } from "./conversation-store";
 import { prisma } from "@/lib/db";
+import { isWalletPromptResult, type WalletPrompt } from "@/messaging/wallet-prompt";
 import { buildFinanceAgentSystemPrompt } from "./finance-agent-prompt";
 
 export type AiRuntimeConfig = {
@@ -15,6 +16,8 @@ export type AgentReply = {
   text: string;
   toolsUsed: string[];
   data?: unknown[];
+  /** Set when a transaction is held back until the user taps a wallet button. */
+  walletPrompt?: WalletPrompt;
 };
 
 export type AgentMessage = {
@@ -138,6 +141,7 @@ async function runOpenRouter(params: {
   const toolsUsed: string[] = [];
   const data: unknown[] = [];
   let writeAttempted = false;
+  let walletPrompt: WalletPrompt | undefined;
 
   type Msg = {
     role: "system" | "user" | "assistant" | "tool";
@@ -205,16 +209,18 @@ async function runOpenRouter(params: {
 
           const results = await executeToolsParallel(params.userId, toolCalls, params.channel);
           for (let i = 0; i < results.length; i++) {
-            data.push(results[i].result);
-            messages.push({ role: "tool", tool_call_id: msg.tool_calls[i].id, content: JSON.stringify(results[i].result) });
+            const result = results[i].result;
+            data.push(result);
+            if (isWalletPromptResult(result)) walletPrompt = result.__walletPrompt;
+            messages.push({ role: "tool", tool_call_id: msg.tool_calls[i].id, content: JSON.stringify(result) });
           }
           continue;
         }
 
-        return { text: msg.content || "Selesai.", toolsUsed, data };
+        return { text: msg.content || "Selesai.", toolsUsed, data, walletPrompt };
       }
 
-      return { text: incompleteAgentReply(writeAttempted), toolsUsed, data };
+      return { text: incompleteAgentReply(writeAttempted && !walletPrompt), toolsUsed, data, walletPrompt };
     } catch (error) {
       lastError = error instanceof Error ? error.message : "Unknown";
       // Tool sudah menulis ke database — mencoba model lain akan menjalankannya ulang.
@@ -225,9 +231,10 @@ async function runOpenRouter(params: {
           error: lastError,
         });
         return {
-          text: incompleteAgentReply(writeAttempted),
+          text: incompleteAgentReply(writeAttempted && !walletPrompt),
           toolsUsed,
           data,
+          walletPrompt,
         };
       }
     }

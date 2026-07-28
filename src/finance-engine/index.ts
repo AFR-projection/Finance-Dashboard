@@ -655,9 +655,27 @@ export async function createWallet(userId: string, raw: CreateWalletInput) {
     await prisma.wallet.updateMany({ where: { userId, isDefault: true }, data: { isDefault: false } });
   }
 
-  return prisma.wallet.create({
+  const wallet = await prisma.wallet.create({
     data: { userId, name: input.name, currency: input.currency, color: input.color ?? null, isDefault: input.isDefault ?? false },
   });
+
+  // Balances are derived from transactions, so an opening balance has to be one.
+  // Recorded here rather than by the caller so the amount stays in the wallet's
+  // own currency and never passes through a conversion.
+  if (input.initialBalance && input.initialBalance > 0) {
+    await prisma.transaction.create({
+      data: {
+        userId,
+        walletId: wallet.id,
+        type: "INCOME",
+        amount: new Prisma.Decimal(input.initialBalance),
+        description: `Saldo awal ${wallet.name}`,
+        transactionDate: new Date(),
+      },
+    });
+  }
+
+  return wallet;
 }
 
 export async function listWallets(userId: string) {

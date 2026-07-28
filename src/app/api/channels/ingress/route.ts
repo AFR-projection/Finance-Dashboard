@@ -61,7 +61,10 @@ export async function POST(request: Request) {
       channel: body.channel,
     });
 
-    return NextResponse.json({ ok: true, data: reply });
+    return NextResponse.json({
+      ok: true,
+      data: { text: reply.text, toolsUsed: reply.toolsUsed, walletPrompt: reply.walletPrompt },
+    });
   } catch (error) {
     console.error("[ingress] error:", error);
     const message =

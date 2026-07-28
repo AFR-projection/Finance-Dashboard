@@ -1,6 +1,12 @@
 import { Bot, GrammyError, HttpError } from "grammy";
 import { prisma } from "../lib/db";
 import { parseTelegramAccessConfirmation } from "./telegram-access-command";
+import {
+  WALLET_CALLBACK_PATTERN,
+  parseWalletCallback,
+  walletKeyboard,
+  type WalletPrompt,
+} from "./wallet-prompt";
 
 async function resolveToken(): Promise<string | null> {
   const fromEnv = process.env.TELEGRAM_BOT_TOKEN?.trim();
@@ -57,10 +63,37 @@ export async function startEmbeddedTelegramBot() {
         },
         body: JSON.stringify({ channel: "TELEGRAM", externalId, message }),
       });
-      const json = (await res.json()) as { data?: { text?: string }; error?: string };
-      return json.data?.text || json.error || "Maaf, terjadi kesalahan.";
+      const json = (await res.json()) as {
+        data?: { text?: string; walletPrompt?: WalletPrompt };
+        error?: string;
+      };
+      if (json.data?.text) return { text: json.data.text, walletPrompt: json.data.walletPrompt };
+      return { text: json.error || "Maaf, terjadi kesalahan." };
     } catch {
-      return "Maaf, terjadi kesalahan koneksi. Coba lagi nanti.";
+      return { text: "Maaf, terjadi kesalahan koneksi. Coba lagi nanti." };
+    }
+  }
+
+  async function chooseWallet(externalId: string, pendingId: string, walletId: string | null) {
+    try {
+      const res = await fetch(`${APP_URL}/api/channels/wallet-choice`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-worker-secret": WORKER_SECRET,
+        },
+        body: JSON.stringify({
+          channel: "TELEGRAM",
+          externalId,
+          pendingId,
+          walletId: walletId ?? undefined,
+          action: walletId ? "confirm" : "cancel",
+        }),
+      });
+      const json = (await res.json()) as { data?: { text?: string }; error?: string };
+      return json.data?.text || json.error || "Gagal mencatat transaksi.";
+    } catch {
+      return "Gagal terhubung ke server. Coba lagi nanti.";
     }
   }
 
@@ -77,6 +110,16 @@ export async function startEmbeddedTelegramBot() {
     const text = await confirmAccess(action as "approve" | "reject", code);
     await ctx.answerCallbackQuery({ text: text.slice(0, 200) });
     // Drop the buttons so the same approval cannot be tapped twice.
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+    await ctx.reply(text);
+  });
+
+  bot.callbackQuery(WALLET_CALLBACK_PATTERN, async (ctx) => {
+    const parsed = parseWalletCallback(ctx.callbackQuery.data ?? "");
+    if (!parsed) return;
+    const text = await chooseWallet(String(ctx.from?.id ?? ""), parsed.pendingId, parsed.walletId);
+    await ctx.answerCallbackQuery({ text: text.slice(0, 200) });
+    // Drop the buttons so the same draft cannot be recorded twice.
     await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
     await ctx.reply(text);
   });
@@ -105,7 +148,11 @@ export async function startEmbeddedTelegramBot() {
 
     const id = String(ctx.from?.id ?? "");
     await ctx.replyWithChatAction("typing");
-    await ctx.reply(await askAgent(id, text));
+    const reply = await askAgent(id, text);
+    await ctx.reply(
+      reply.text,
+      reply.walletPrompt ? { reply_markup: walletKeyboard(reply.walletPrompt) } : {},
+    );
   });
 
   bot.catch((err) => {

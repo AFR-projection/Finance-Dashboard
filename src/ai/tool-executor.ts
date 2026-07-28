@@ -1,5 +1,11 @@
 import { FinanceEngine } from "@/finance-engine";
 import { daysAgo } from "@/lib/utils";
+import { createPendingTransaction } from "@/messaging/pending-transaction";
+import {
+  WALLET_PROMPT_MARKER,
+  listActiveWalletChoices,
+  type WalletPromptToolResult,
+} from "@/messaging/wallet-prompt";
 import type { AgentToolName } from "./tools";
 
 function nowInTimezone(timezone: string): {
@@ -92,6 +98,50 @@ export async function executeTool(
         const tz = await resolveUserTimezone(userId);
         const currentTime = nowInTimezone(tz);
         const date = resolveTransactionDate(args.transactionDate, currentTime.isoDate);
+        const walletId = args.walletId ? String(args.walletId) : undefined;
+
+        // With several accounts open and none named, guessing would silently
+        // debit the wrong balance. Ask first instead of recording blind.
+        if (!walletId && channel !== "WEB") {
+          const wallets = await listActiveWalletChoices(userId);
+          if (wallets.length > 1) {
+            // Only Telegram can render buttons, so only there is the draft held
+            // server-side. On WhatsApp the agent asks in text and the user's
+            // reply resolves the wallet on the next turn.
+            if (channel !== "TELEGRAM") {
+              return {
+                status: "AWAITING_WALLET_CHOICE",
+                wallets,
+                note: "Transaksi belum dicatat. Tanyakan rekening mana yang dipakai dengan menyebut pilihannya, lalu catat ulang dengan walletId setelah user menjawab.",
+              };
+            }
+
+            const pending = await createPendingTransaction({
+              userId,
+              channel,
+              type: args.type as "INCOME" | "EXPENSE",
+              amount: Number(args.amount),
+              category: String(args.category ?? "Other"),
+              description: String(args.description ?? "transaction"),
+              paymentMethod: args.paymentMethod ? String(args.paymentMethod) : undefined,
+              transactionDate: date,
+              rawInput: args.rawInput ? String(args.rawInput) : undefined,
+            });
+
+            return {
+              [WALLET_PROMPT_MARKER]: {
+                pendingId: pending.id,
+                question: `${args.type === "INCOME" ? "Pemasukan" : "Pengeluaran"} ${String(
+                  args.description ?? "",
+                )} — pilih rekening:`,
+                wallets,
+              },
+              status: "AWAITING_WALLET_CHOICE",
+              note: "Transaksi belum dicatat. Tombol pilihan rekening sudah dikirim ke user. Minta user menekan salah satu tombol, jangan sebut daftar rekening lagi, dan jangan bilang transaksi sudah tercatat.",
+            } satisfies WalletPromptToolResult;
+          }
+        }
+
         return FinanceEngine.createTransaction(userId, {
           type: args.type as "INCOME" | "EXPENSE",
           amount: Number(args.amount),
@@ -101,7 +151,7 @@ export async function executeTool(
           transactionDate: date,
           channel,
           rawInput: args.rawInput ? String(args.rawInput) : undefined,
-          walletId: args.walletId ? String(args.walletId) : undefined,
+          walletId,
         });
       }
 
@@ -472,6 +522,10 @@ export async function executeTool(
             currency: String(args.currency ?? "IDR"),
             color: args.color ? String(args.color) : undefined,
             isDefault: args.isDefault === true,
+            initialBalance:
+              args.initialBalance !== undefined && args.initialBalance !== null
+                ? Number(args.initialBalance)
+                : undefined,
           });
         }
         if (action === "update") {

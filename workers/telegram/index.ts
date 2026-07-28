@@ -1,9 +1,17 @@
-import { Bot, GrammyError, HttpError } from "grammy";
+import { Bot, GrammyError, HttpError, type Context } from "grammy";
 import { loadEnvConfig } from "@next/env";
 import pino from "pino";
 import { prisma } from "../../src/lib/db";
 import { parseTelegramAccessConfirmation } from "../../src/messaging/telegram-access-command";
 import { formatForChannel, splitForChannel } from "../../src/messaging/chat-format";
+import {
+  WALLET_CALLBACK_PATTERN,
+  parseWalletCallback,
+  walletKeyboard,
+  type WalletPrompt,
+} from "../../src/messaging/wallet-prompt";
+
+type AgentReplyPayload = { text: string; walletPrompt?: WalletPrompt };
 
 loadEnvConfig(process.cwd());
 
@@ -47,7 +55,7 @@ async function main() {
   const token = await waitForToken();
   const bot = new Bot(token);
 
-  async function askAgent(externalId: string, message: string): Promise<string> {
+  async function askAgent(externalId: string, message: string): Promise<AgentReplyPayload> {
     try {
       const res = await fetch(`${APP_URL}/api/channels/ingress`, {
         method: "POST",
@@ -57,11 +65,53 @@ async function main() {
         },
         body: JSON.stringify({ channel: "TELEGRAM", externalId, message }),
       });
-      const json = (await res.json()) as { data?: { text?: string }; error?: string };
-      return json.data?.text || json.error || "Maaf, terjadi kesalahan.";
+      const json = (await res.json()) as { data?: AgentReplyPayload; error?: string };
+      if (json.data?.text) return json.data;
+      return { text: json.error || "Maaf, terjadi kesalahan." };
     } catch (err) {
       log.error({ err }, "askAgent failed");
-      return "Maaf, terjadi kesalahan koneksi. Coba lagi nanti.";
+      return { text: "Maaf, terjadi kesalahan koneksi. Coba lagi nanti." };
+    }
+  }
+
+  async function chooseWallet(
+    externalId: string,
+    pendingId: string,
+    walletId: string | null,
+  ): Promise<string> {
+    try {
+      const res = await fetch(`${APP_URL}/api/channels/wallet-choice`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-worker-secret": WORKER_SECRET,
+        },
+        body: JSON.stringify({
+          channel: "TELEGRAM",
+          externalId,
+          pendingId,
+          walletId: walletId ?? undefined,
+          action: walletId ? "confirm" : "cancel",
+        }),
+      });
+      const json = (await res.json()) as { data?: { text?: string }; error?: string };
+      return json.data?.text || json.error || "Gagal mencatat transaksi.";
+    } catch (err) {
+      log.error({ err }, "chooseWallet failed");
+      return "Gagal terhubung ke server. Coba lagi nanti.";
+    }
+  }
+
+  async function replyAgent(ctx: Context, reply: AgentReplyPayload) {
+    const chunks = splitForChannel(formatForChannel(reply.text, "TELEGRAM"), 3500);
+    for (let i = 0; i < chunks.length; i++) {
+      const isLast = i === chunks.length - 1;
+      await ctx.reply(chunks[i], {
+        parse_mode: "HTML",
+        ...(isLast && reply.walletPrompt
+          ? { reply_markup: walletKeyboard(reply.walletPrompt) }
+          : {}),
+      });
     }
   }
 
@@ -172,24 +222,43 @@ async function main() {
     await ctx.reply(await pairAccount(id, code, name || undefined));
   });
 
+  bot.callbackQuery(WALLET_CALLBACK_PATTERN, async (ctx) => {
+    const parsed = parseWalletCallback(ctx.callbackQuery.data ?? "");
+    if (!parsed) return;
+    const text = await chooseWallet(String(ctx.from?.id ?? ""), parsed.pendingId, parsed.walletId);
+    await ctx.answerCallbackQuery({ text: text.slice(0, 200) });
+    // Drop the buttons so the same draft cannot be recorded twice.
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+    await ctx.reply(text);
+  });
+
   bot.command("report", async (ctx) => {
     await ctx.replyWithChatAction("typing");
-    await ctx.reply(
+    await replyAgent(
+      ctx,
       await askAgent(String(ctx.from?.id ?? ""), "Buatkan laporan keuangan 30 hari terakhir"),
     );
   });
 
   bot.command("balance", async (ctx) => {
     await ctx.replyWithChatAction("typing");
-    await ctx.reply(
-      await askAgent(String(ctx.from?.id ?? ""), "Berapa ringkasan saldo, income, dan expense bulan ini?"),
+    await replyAgent(
+      ctx,
+      await askAgent(
+        String(ctx.from?.id ?? ""),
+        "Berapa ringkasan saldo, income, dan expense bulan ini?",
+      ),
     );
   });
 
   bot.command("expense", async (ctx) => {
     await ctx.replyWithChatAction("typing");
-    await ctx.reply(
-      await askAgent(String(ctx.from?.id ?? ""), "Analisis pengeluaran saya bulan ini dan kategori terbesar"),
+    await replyAgent(
+      ctx,
+      await askAgent(
+        String(ctx.from?.id ?? ""),
+        "Analisis pengeluaran saya bulan ini dan kategori terbesar",
+      ),
     );
   });
 
@@ -211,10 +280,7 @@ async function main() {
     }
 
     await ctx.replyWithChatAction("typing");
-    const reply = await askAgent(id, ctx.message.text);
-    for (const chunk of splitForChannel(formatForChannel(reply, "TELEGRAM"), 3500)) {
-      await ctx.reply(chunk, { parse_mode: "HTML" });
-    }
+    await replyAgent(ctx, await askAgent(id, ctx.message.text));
   });
 
   bot.catch((err) => {

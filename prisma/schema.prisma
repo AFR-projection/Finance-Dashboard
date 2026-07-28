@@ -52,6 +52,7 @@ model User {
   whatsappSession WhatsAppSession?
   trustedDevices TrustedDevice[]
   accessSessions AccessSession[]
+  pendingTransactions PendingTransaction[]
   wallets       Wallet[]
 
   @@map("users")
@@ -367,6 +368,30 @@ model AccessSession {
   @@index([userId])
   @@index([expiresAt])
   @@map("access_sessions")
+}
+
+/// A transaction the agent parsed but has not written yet, waiting for the user
+/// to pick a wallet from chat buttons. Lives in the database because the bot and
+/// the web app are separate processes and either may restart between the two steps.
+model PendingTransaction {
+  id          String          @id @default(cuid())
+  userId      String          @map("user_id")
+  channel     ChannelType
+  type        TransactionType
+  amount      Decimal         @db.Decimal(18, 2)
+  category    String
+  description String
+  paymentMethod String?       @map("payment_method")
+  transactionDate DateTime    @map("transaction_date")
+  rawInput    String?         @map("raw_input") @db.Text
+  expiresAt   DateTime        @map("expires_at")
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("pending_transactions")
 }
 
 /// Single-tenant owner/bot config (satu instance = satu pemilik)
