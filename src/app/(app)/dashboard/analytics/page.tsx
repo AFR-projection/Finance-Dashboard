@@ -16,6 +16,7 @@ import {
 } from "recharts";
 import { formatCurrency } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ArrowDownLeft, ArrowUpRight, Layers3 } from "lucide-react";
 
 export default function AnalyticsPage() {
   const [data, setData] = useState<{
@@ -31,19 +32,37 @@ export default function AnalyticsPage() {
 
   if (!data) return <p>Loading analytics...</p>;
 
+  const latest = data.cashflow.series.at(-1) ?? { income: 0, expense: 0, label: "" };
+  const topCategory = data.overview.topCategories[0];
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 pt-1 lg:space-y-6 lg:pt-8">
       <div>
-        <h1 className="font-[family-name:var(--font-display)] text-4xl text-primary">Analytics</h1>
-        <p className="text-muted-foreground">Cashflow, kategori, dan perbandingan bulanan.</p>
+        <p className="app-eyebrow mb-1">Deep dive</p>
+        <h1 className="app-page-title">Analitik</h1>
+        <p className="mt-1 text-xs text-muted-foreground sm:text-sm">Lihat pola, perbandingan, dan penggerak utama.</p>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
+        {[
+          { label: "Masuk", value: formatCurrency(latest.income, data.cashflow.currency), icon: ArrowDownLeft, tone: "text-emerald-700 bg-emerald-500/10" },
+          { label: "Keluar", value: formatCurrency(latest.expense, data.cashflow.currency), icon: ArrowUpRight, tone: "text-amber-700 bg-amber-500/10" },
+          { label: "Top kategori", value: topCategory?.name ?? "—", icon: Layers3, tone: "text-primary bg-primary/8" },
+        ].map((item) => (
+          <div key={item.label} className="app-surface min-w-0 rounded-2xl p-3 sm:p-4">
+            <span className={`grid size-7 place-items-center rounded-xl ${item.tone}`}><item.icon className="size-3.5" /></span>
+            <p className="mt-3 truncate text-[9px] text-muted-foreground">{item.label}</p>
+            <p className="tabular-money mt-0.5 truncate text-[11px] font-bold sm:text-sm">{item.value}</p>
+          </div>
+        ))}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="border-border/60 bg-white/70 shadow-none">
+        <Card className="app-surface rounded-[1.5rem] ring-0">
           <CardHeader>
             <CardTitle>Income vs Expense · {data.cashflow.currency}</CardTitle>
           </CardHeader>
-          <CardContent className="h-80">
+          <CardContent className="h-72 px-1 sm:h-80 sm:px-4">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data.cashflow.series}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#d6ddd8" />
@@ -58,11 +77,11 @@ export default function AnalyticsPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-border/60 bg-white/70 shadow-none">
+        <Card className="app-surface rounded-[1.5rem] ring-0">
           <CardHeader>
             <CardTitle>Expense by category</CardTitle>
           </CardHeader>
-          <CardContent className="h-80">
+          <CardContent className="h-72 px-1 sm:h-80 sm:px-4">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie

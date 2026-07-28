@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { ArrowDownLeft, ArrowUpRight, Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -102,6 +103,10 @@ export default function TransactionsPage() {
   }
 
   function openCreate() {
+    if (wallets.length === 0) {
+      toast.error("Buat rekening terlebih dahulu sebelum menambah transaksi");
+      return;
+    }
     const preset = emptyForm();
     const fallback = wallets.find((w) => w.isDefault) ?? wallets[0];
     setForm(fallback ? { ...preset, walletId: fallback.id } : preset);
@@ -181,21 +186,20 @@ export default function TransactionsPage() {
   }, [items]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+    <div className="space-y-5 pt-1 lg:space-y-6 lg:pt-8">
+      <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="font-[family-name:var(--font-display)] text-4xl text-primary">
-            Transactions
-          </h1>
-          <p className="text-muted-foreground">Cari, filter, edit, dan export riwayat.</p>
+          <p className="app-eyebrow mb-1">Money activity</p>
+          <h1 className="app-page-title">Transaksi</h1>
+          <p className="mt-1 text-xs text-muted-foreground sm:text-sm">Semua arus uang dalam satu timeline.</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={exportCsv}>
-            Export CSV
+        <div className="flex shrink-0 gap-2">
+          <Button variant="outline" size="icon-lg" className="app-surface rounded-xl" onClick={exportCsv} aria-label="Export CSV">
+            <Download className="size-4" />
           </Button>
-          <Button onClick={openCreate}>Tambah</Button>
+          <Button size="lg" className="rounded-xl px-3" onClick={openCreate}><Plus className="size-4" /><span className="hidden sm:inline">Tambah</span></Button>
           <Dialog open={open} onOpenChange={setOpen}>
-            <DialogContent>
+            <DialogContent className="max-h-[92svh] overflow-y-auto rounded-[1.5rem] max-sm:bottom-0 max-sm:top-auto max-sm:translate-y-0">
               <DialogHeader>
                 <DialogTitle>{form.id ? "Edit transaksi" : "Tambah transaksi"}</DialogTitle>
               </DialogHeader>
@@ -255,7 +259,6 @@ export default function TransactionsPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={NO_WALLET}>Tanpa rekening</SelectItem>
                       {wallets.map((w) => (
                         <SelectItem key={w.id} value={w.id}>
                           {w.name} · {w.currency}
@@ -275,7 +278,7 @@ export default function TransactionsPage() {
                     required
                   />
                 </div>
-                <Button type="submit" className="w-full">
+                <Button type="submit" className="h-11 w-full rounded-xl" disabled={form.walletId === NO_WALLET}>
                   Simpan
                 </Button>
               </form>
@@ -284,25 +287,24 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <Input
-          placeholder="Search description..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-xs bg-white/80"
-        />
+      <div className="app-surface grid gap-2 rounded-2xl p-2.5 sm:flex sm:flex-wrap sm:p-3">
+        <div className="relative sm:min-w-64 sm:flex-1">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input placeholder="Cari transaksi..." value={search} onChange={(e) => setSearch(e.target.value)} className="h-10 border-0 bg-muted/55 pl-9 shadow-none" />
+        </div>
+        <div className="grid grid-cols-[1fr_1.25fr_auto] gap-2">
         <Select value={type} onValueChange={(v) => setType(v ?? "ALL")}>
-          <SelectTrigger className="w-40 bg-white/80">
+          <SelectTrigger className="h-10 w-full bg-card sm:w-36">
             <SelectValue placeholder="Type" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="ALL">All</SelectItem>
-            <SelectItem value="INCOME">Income</SelectItem>
-            <SelectItem value="EXPENSE">Expense</SelectItem>
+            <SelectItem value="ALL">Semua</SelectItem>
+            <SelectItem value="INCOME">Masuk</SelectItem>
+            <SelectItem value="EXPENSE">Keluar</SelectItem>
           </SelectContent>
         </Select>
         <Select value={walletFilter} onValueChange={(v) => setWalletFilter(v ?? "ALL")}>
-          <SelectTrigger className="w-48 bg-white/80">
+          <SelectTrigger className="h-10 w-full bg-card sm:w-44">
             <SelectValue placeholder="Rekening" />
           </SelectTrigger>
           <SelectContent>
@@ -314,10 +316,11 @@ export default function TransactionsPage() {
             ))}
           </SelectContent>
         </Select>
-        <Button onClick={load}>Apply</Button>
+        <Button className="h-10 rounded-xl" onClick={load}>Terapkan</Button>
+        </div>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-border/60 bg-white/70">
+      <div className="app-surface hidden overflow-hidden rounded-2xl md:block">
         <Table>
           <TableHeader>
             <TableRow>
@@ -372,6 +375,31 @@ export default function TransactionsPage() {
             ))}
           </TableBody>
         </Table>
+      </div>
+      <div className="space-y-2.5 md:hidden">
+        {loading && <div className="app-surface rounded-2xl p-4 text-xs text-muted-foreground">Memuat transaksi...</div>}
+        {!loading && items.length === 0 && <div className="app-surface rounded-2xl p-8 text-center text-xs text-muted-foreground">Belum ada transaksi.</div>}
+        {items.map((transaction) => {
+          const income = transaction.type === "INCOME";
+          return (
+            <div key={transaction.id} className="app-surface flex items-center gap-3 rounded-2xl p-3.5">
+              <span className={`grid size-10 shrink-0 place-items-center rounded-2xl ${income ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700"}`}>
+                {income ? <ArrowDownLeft className="size-4" /> : <ArrowUpRight className="size-4" />}
+              </span>
+              <button type="button" className="min-w-0 flex-1 text-left" onClick={() => openEdit(transaction)}>
+                <p className="truncate text-xs font-semibold">{transaction.description}</p>
+                <p className="mt-1 truncate text-[10px] text-muted-foreground">{transaction.category?.name ?? "Lainnya"} · {transaction.wallet?.name ?? "Tanpa rekening"} · {new Date(transaction.transactionDate).toLocaleDateString("id-ID", { day: "numeric", month: "short" })}</p>
+              </button>
+              <div className="text-right">
+                <p className={`tabular-money text-xs font-bold ${income ? "text-emerald-700" : "text-foreground"}`}>{income ? "+" : "-"}{formatCurrency(transaction.amount, transaction.wallet?.currency ?? "IDR")}</p>
+                <div className="mt-1 flex justify-end gap-0.5">
+                  <Button variant="ghost" size="icon-xs" onClick={() => openEdit(transaction)} aria-label="Edit"><Pencil className="size-3" /></Button>
+                  <Button variant="ghost" size="icon-xs" className="text-destructive" onClick={() => void remove(transaction.id)} aria-label="Hapus"><Trash2 className="size-3" /></Button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
       <p className="text-sm text-muted-foreground">
         Net on page:{" "}

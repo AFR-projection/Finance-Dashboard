@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, Star } from "lucide-react";
+import { Plus, Pencil, Trash2, Star, WalletCards, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -218,16 +218,17 @@ export default function WalletsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-5 pt-1 lg:space-y-6 lg:pt-8">
+      <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Rekening</h1>
-          <p className="text-sm text-muted-foreground">Kelola akun keuangan per mata uang</p>
+          <p className="app-eyebrow mb-1">Accounts</p>
+          <h1 className="app-page-title">Rekening</h1>
+          <p className="mt-1 text-xs text-muted-foreground sm:text-sm">Saldo terpisah, rapi untuk setiap mata uang.</p>
         </div>
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
-          <DialogTrigger render={<Button />}>
-            <Plus className="mr-2 size-4" />
-            Tambah
+          <DialogTrigger render={<Button className="h-10 rounded-xl px-3" />}>
+            <Plus className="size-4" />
+            <span className="hidden sm:inline">Tambah rekening</span>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
@@ -238,23 +239,43 @@ export default function WalletsPage() {
         </Dialog>
       </div>
 
+      {!loading && wallets.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="app-surface rounded-2xl p-4">
+            <WalletCards className="mb-3 size-4 text-primary" />
+            <p className="text-xl font-bold tracking-tight">{wallets.length}</p>
+            <p className="text-[10px] text-muted-foreground">Rekening aktif</p>
+          </div>
+          <div className="app-surface rounded-2xl p-4">
+            <ShieldCheck className="mb-3 size-4 text-primary" />
+            <p className="text-xl font-bold tracking-tight">{new Set(wallets.map((wallet) => wallet.currency)).size}</p>
+            <p className="text-[10px] text-muted-foreground">Mata uang</p>
+          </div>
+          <div className="app-surface col-span-2 hidden rounded-2xl p-4 sm:block sm:col-span-1">
+            <Star className="mb-3 size-4 text-amber-500" />
+            <p className="truncate text-sm font-bold tracking-tight">{wallets.find((wallet) => wallet.isDefault)?.name ?? "Belum dipilih"}</p>
+            <p className="text-[10px] text-muted-foreground">Rekening utama</p>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <p className="text-sm text-muted-foreground">Memuat...</p>
       ) : wallets.length === 0 ? (
-        <Card>
+        <Card className="app-surface rounded-2xl ring-0">
           <CardContent className="py-12 text-center text-sm text-muted-foreground">
             Belum ada rekening. Tambah rekening IDR, USD, atau mata uang lainnya.
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {wallets.map((w) => (
-            <Card key={w.id} className="relative overflow-hidden">
+            <Card key={w.id} className="app-surface relative min-h-44 overflow-hidden rounded-[1.5rem] ring-0 transition-transform hover:-translate-y-0.5">
               <div
                 className="absolute inset-y-0 left-0 w-1"
                 style={{ backgroundColor: w.color ?? "#0F766E" }}
               />
-              <CardHeader className="pb-2 pl-5">
+              <CardHeader className="pb-2 pl-5 pt-1">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <CardTitle className="text-base">{w.name}</CardTitle>
@@ -266,15 +287,15 @@ export default function WalletsPage() {
                 </div>
               </CardHeader>
               <CardContent className="pb-4 pl-5">
-                <p className="text-2xl font-semibold tabular-nums">
+                <p className="tabular-money mt-3 text-2xl font-bold">
                   {formatBalance(w.balance, w.currency)}
                 </p>
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" variant="outline" onClick={() => setEditTarget(w)}>
+                <div className="mt-5 flex gap-2 border-t border-border/50 pt-3">
+                  <Button size="sm" variant="ghost" className="rounded-lg" onClick={() => setEditTarget(w)}>
                     <Pencil className="mr-1 size-3.5" />
                     Edit
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => void handleDelete(w.id)}>
+                  <Button size="sm" variant="ghost" className="rounded-lg text-destructive" onClick={() => void handleDelete(w.id)}>
                     <Trash2 className="mr-1 size-3.5" />
                     Nonaktifkan
                   </Button>

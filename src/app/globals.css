@@ -44,31 +44,31 @@
 }
 
 :root {
-  --background: oklch(0.985 0.01 145);
-  --foreground: oklch(0.22 0.03 165);
-  --card: oklch(0.995 0.005 145);
+  --background: oklch(0.975 0.008 165);
+  --foreground: oklch(0.19 0.025 175);
+  --card: oklch(0.995 0.004 165);
   --card-foreground: oklch(0.22 0.03 165);
   --popover: oklch(0.995 0.005 145);
   --popover-foreground: oklch(0.22 0.03 165);
-  --primary: oklch(0.35 0.07 165);
+  --primary: oklch(0.32 0.075 174);
   --primary-foreground: oklch(0.98 0.01 145);
-  --secondary: oklch(0.94 0.02 145);
+  --secondary: oklch(0.945 0.018 168);
   --secondary-foreground: oklch(0.28 0.05 165);
-  --muted: oklch(0.945 0.015 145);
-  --muted-foreground: oklch(0.48 0.03 165);
-  --accent: oklch(0.93 0.03 85);
+  --muted: oklch(0.95 0.01 165);
+  --muted-foreground: oklch(0.5 0.025 175);
+  --accent: oklch(0.94 0.035 92);
   --accent-foreground: oklch(0.28 0.05 85);
   --destructive: oklch(0.55 0.2 25);
-  --border: oklch(0.88 0.02 145);
-  --input: oklch(0.88 0.02 145);
+  --border: oklch(0.89 0.015 165);
+  --input: oklch(0.89 0.015 165);
   --ring: oklch(0.45 0.07 165);
   --chart-1: oklch(0.45 0.1 165);
   --chart-2: oklch(0.55 0.1 85);
   --chart-3: oklch(0.5 0.08 220);
   --chart-4: oklch(0.6 0.12 40);
   --chart-5: oklch(0.4 0.06 300);
-  --radius: 0.75rem;
-  --sidebar: oklch(0.985 0.01 165);
+  --radius: 0.9rem;
+  --sidebar: oklch(0.982 0.009 165);
   --sidebar-foreground: oklch(0.22 0.03 165);
   --sidebar-primary: oklch(0.35 0.07 165);
   --sidebar-primary-foreground: oklch(0.98 0.01 145);
@@ -85,11 +85,45 @@
   body {
     @apply bg-background text-foreground;
     background-image:
-      radial-gradient(ellipse 80% 50% at 10% -10%, oklch(0.9 0.05 165 / 0.45), transparent),
-      radial-gradient(ellipse 60% 40% at 100% 0%, oklch(0.92 0.04 85 / 0.35), transparent);
+      radial-gradient(ellipse 70% 42% at 0% -10%, oklch(0.86 0.06 170 / 0.28), transparent),
+      radial-gradient(ellipse 55% 36% at 100% 0%, oklch(0.92 0.05 92 / 0.24), transparent);
     background-attachment: fixed;
+    min-width: 320px;
   }
   html {
     @apply font-sans;
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+  ::selection {
+    background: oklch(0.72 0.08 170 / 0.3);
+  }
+  button, a, input, textarea, select {
+    touch-action: manipulation;
+  }
+}
+
+@layer utilities {
+  .app-surface {
+    @apply border border-white/70 bg-card/80 shadow-[0_18px_45px_-32px_rgba(15,45,38,.35)] backdrop-blur-xl;
+  }
+  .app-page-title {
+    @apply text-[1.75rem] leading-tight font-bold tracking-[-0.045em] text-foreground sm:text-3xl;
+  }
+  .app-eyebrow {
+    @apply text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground;
+  }
+  .hide-scrollbar {
+    scrollbar-width: none;
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .mobile-safe-bottom {
+    padding-bottom: max(0.4rem, env(safe-area-inset-bottom));
+  }
+  .tabular-money {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.025em;
   }
 }

@@ -3,7 +3,7 @@ import { runFinanceAgent } from "@/ai/agent";
 import { resolveAiConfig } from "@/ai/resolve-config";
 import { jsonOk, withApiGuard } from "@/lib/api";
 import { settlePendingWalletReply } from "@/messaging/settle-wallet-reply";
-import { appendHistory } from "@/ai/conversation-store";
+import { appendHistory, clearHistory } from "@/ai/conversation-store";
 
 export async function POST(request: Request) {
   return withApiGuard(
@@ -34,4 +34,11 @@ export async function POST(request: Request) {
     },
     { rateLimitKey: "agent", limit: 40 },
   );
+}
+
+export async function DELETE(request: Request) {
+  return withApiGuard(request, async (userId) => {
+    await clearHistory(userId, "WEB");
+    return jsonOk({ cleared: true });
+  });
 }

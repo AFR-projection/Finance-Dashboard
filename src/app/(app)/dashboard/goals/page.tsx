@@ -82,15 +82,14 @@ export default function GoalsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 pt-1 lg:space-y-6 lg:pt-8">
       <div>
-        <h1 className="font-[family-name:var(--font-display)] text-4xl text-primary">
-          Financial Goals
-        </h1>
-        <p className="text-muted-foreground">Target tabungan dan progress bulanan.</p>
+        <p className="app-eyebrow mb-1">Future money</p>
+        <h1 className="app-page-title">Financial goals</h1>
+        <p className="mt-1 text-xs text-muted-foreground sm:text-sm">Ubah target besar menjadi progres yang terlihat.</p>
       </div>
 
-      <Card className="border-border/60 bg-white/70 shadow-none">
+      <Card className="app-surface rounded-[1.5rem] ring-0">
         <CardHeader>
           <CardTitle className="text-base">Tambah goal</CardTitle>
         </CardHeader>
@@ -135,7 +134,7 @@ export default function GoalsPage() {
       {loading && <p>Loading...</p>}
       <div className="grid gap-4 md:grid-cols-2">
         {items.map((g) => (
-          <Card key={g.id} className="border-border/60 bg-white/70 shadow-none">
+          <Card key={g.id} className="app-surface rounded-[1.5rem] ring-0">
             <CardHeader className="flex flex-row items-start justify-between gap-2">
               <div>
                 <CardTitle className="text-lg">{g.goalName}</CardTitle>

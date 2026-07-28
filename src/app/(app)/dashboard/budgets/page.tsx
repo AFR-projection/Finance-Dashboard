@@ -59,20 +59,21 @@ export default function BudgetsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 pt-1 lg:space-y-6 lg:pt-8">
       <div>
-        <h1 className="font-[family-name:var(--font-display)] text-4xl text-primary">Budgets</h1>
-        <p className="text-muted-foreground">Pantau progress dan warning mendekati limit.</p>
+        <p className="app-eyebrow mb-1">Spending guardrails</p>
+        <h1 className="app-page-title">Budget</h1>
+        <p className="mt-1 text-xs text-muted-foreground sm:text-sm">Batas pengeluaran yang bekerja sebelum terlambat.</p>
       </div>
 
-      <Card className="border-border/60 bg-white/70 shadow-none">
+      <Card className="app-surface rounded-[1.5rem] ring-0">
         <CardHeader>
           <CardTitle>Set monthly budget</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onSubmit} className="flex flex-wrap gap-3">
+          <form onSubmit={onSubmit} className="grid gap-2.5 sm:grid-cols-[1fr_1fr_auto]">
             <Select value={categoryId} onValueChange={(v) => setCategoryId(v ?? "")}>
-              <SelectTrigger className="w-48">
+              <SelectTrigger className="h-10 w-full">
                 <SelectValue placeholder="Category" />
               </SelectTrigger>
               <SelectContent>
@@ -88,16 +89,16 @@ export default function BudgetsPage() {
               placeholder="Limit (IDR)"
               value={limit}
               onChange={(e) => setLimit(e.target.value)}
-              className="w-48"
+              className="h-10 w-full"
             />
-            <Button type="submit">Save</Button>
+            <Button type="submit" className="h-10 rounded-xl">Simpan</Button>
           </form>
         </CardContent>
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
         {budgets.map((b) => (
-          <Card key={b.id} className="border-border/60 bg-white/70 shadow-none">
+          <Card key={b.id} className="app-surface rounded-2xl ring-0">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-base">{b.categoryName}</CardTitle>
               <span

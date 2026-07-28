@@ -15,8 +15,15 @@ const instrument = Instrument_Serif({
 });
 
 export const metadata = {
-  title: "Ledgerly — AI Finance Agent",
+  title: "Ledgerly — AI Financial OS",
   description: "Personal AI finance assistant with WhatsApp, Telegram, and premium dashboard.",
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover" as const,
+  themeColor: "#f3f7f5",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
