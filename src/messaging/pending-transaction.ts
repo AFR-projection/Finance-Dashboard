@@ -5,12 +5,6 @@ import * as FinanceEngine from "@/finance-engine";
 /** Long enough for the user to read the buttons, short enough not to pile up. */
 const TTL_MINUTES = 30;
 
-export type PendingWalletChoice = {
-  id: string;
-  name: string;
-  currency: string;
-};
-
 export type PendingTransactionDraft = {
   userId: string;
   channel: "WHATSAPP" | "TELEGRAM";
@@ -48,6 +42,16 @@ export async function createPendingTransaction(draft: PendingTransactionDraft) {
 
 export async function purgeExpiredPendingTransactions() {
   await prisma.pendingTransaction.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+}
+
+export async function findLivePendingTransaction(
+  userId: string,
+  channel: "WHATSAPP" | "TELEGRAM",
+) {
+  return prisma.pendingTransaction.findFirst({
+    where: { userId, channel, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: "desc" },
+  });
 }
 
 /**

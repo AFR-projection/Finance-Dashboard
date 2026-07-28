@@ -2,7 +2,8 @@ import { toolsForOpenAICompatible, type AgentToolName } from "./tools";
 import { executeToolsParallel } from "./tool-executor";
 import { appendHistory, loadHistory } from "./conversation-store";
 import { prisma } from "@/lib/db";
-import { isWalletPromptResult, type WalletPrompt } from "@/messaging/wallet-prompt";
+import { isWalletPromptResult } from "@/messaging/wallet-prompt";
+import type { WalletPrompt } from "@/messaging/wallet-choice";
 import { buildFinanceAgentSystemPrompt } from "./finance-agent-prompt";
 
 export type AiRuntimeConfig = {

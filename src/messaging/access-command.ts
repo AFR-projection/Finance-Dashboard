@@ -1,12 +1,12 @@
-export type TelegramAccessConfirmation = {
+export type AccessConfirmation = {
   action: "approve" | "reject";
   code: string;
 };
 
 /** Parse the non-command formats advertised in owner notifications. */
-export function parseTelegramAccessConfirmation(
+export function parseAccessConfirmation(
   value: string,
-): TelegramAccessConfirmation | null {
+): AccessConfirmation | null {
   const text = value.trim();
   const actionMatch = text.match(/^(approve|reject)\s+([a-zA-Z0-9]{4,16})$/i);
 

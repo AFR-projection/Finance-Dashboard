@@ -16,6 +16,9 @@ import nextEnv from "@next/env";
 import fs from "fs";
 import path from "path";
 import { formatForChannel, splitForChannel } from "../../src/messaging/chat-format";
+import { resolveChatCommand } from "../../src/messaging/chat-commands";
+import { parseAccessConfirmation } from "../../src/messaging/access-command";
+import { walletPromptText, type WalletPrompt } from "../../src/messaging/wallet-choice";
 
 nextEnv.loadEnvConfig(process.cwd());
 
@@ -67,6 +70,29 @@ async function syncSession(patch: {
   }
 }
 
+async function askAgent(externalId: string, message: string): Promise<string> {
+  const res = await fetch(`${APP_URL}/api/channels/ingress`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-worker-secret": WORKER_SECRET,
+    },
+    body: JSON.stringify({ channel: "WHATSAPP", externalId, message }),
+    timeout: 60000,
+  });
+  const json = (await res.json()) as {
+    data?: { text?: string; walletPrompt?: WalletPrompt };
+    error?: string;
+  };
+  if (!json.data?.text) return json.error || "Maaf, terjadi kesalahan.";
+
+  // WhatsApp has no interactive buttons for personal accounts, so the accounts
+  // are offered as a numbered list the user answers in plain text.
+  return json.data.walletPrompt
+    ? `${json.data.text}\n\n${walletPromptText(json.data.walletPrompt)}`
+    : json.data.text;
+}
+
 async function processMessage(externalId: string, text: string): Promise<string> {
   try {
     const linkMatch = text.match(/^link\s+([a-zA-Z0-9]+)$/i);
@@ -83,32 +109,26 @@ async function processMessage(externalId: string, text: string): Promise<string>
       return json.data?.text || json.error || "Gagal pairing.";
     }
 
-    const authMatch = text.match(/^(approve|reject)\s+([a-zA-Z0-9]+)$/i);
-    if (authMatch) {
-      const action = authMatch[1].toLowerCase();
+    const confirmation = parseAccessConfirmation(text);
+    if (confirmation) {
       const res = await fetch(`${APP_URL}/api/access/confirm`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "x-worker-secret": WORKER_SECRET,
         },
-        body: JSON.stringify({ action, code: authMatch[2] }),
+        body: JSON.stringify({ action: confirmation.action, code: confirmation.code }),
       });
       const json = (await res.json()) as { data?: { text?: string }; error?: string };
       return json.data?.text || json.error || "Gagal konfirmasi akses.";
     }
 
-    const res = await fetch(`${APP_URL}/api/channels/ingress`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-worker-secret": WORKER_SECRET,
-      },
-      body: JSON.stringify({ channel: "WHATSAPP", externalId, message: text }),
-      timeout: 60000,
-    });
-    const json = (await res.json()) as { data?: { text?: string }; error?: string };
-    return json.data?.text || json.error || "Maaf, terjadi kesalahan.";
+    // WhatsApp shows no command menu, so the same slash commands Telegram
+    // registers are matched here by hand.
+    const command = resolveChatCommand(text);
+    if (command?.kind === "text") return command.text;
+
+    return askAgent(externalId, command?.prompt ?? text);
   } catch (err) {
     log.error({ err }, "processMessage failed");
     return "Maaf, terjadi kesalahan koneksi. Coba lagi nanti.";

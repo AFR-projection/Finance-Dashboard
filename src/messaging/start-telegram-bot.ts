@@ -1,12 +1,14 @@
-import { Bot, GrammyError, HttpError } from "grammy";
+import { Bot, GrammyError, HttpError, type Context } from "grammy";
 import { prisma } from "../lib/db";
-import { parseTelegramAccessConfirmation } from "./telegram-access-command";
+import { parseAccessConfirmation } from "./access-command";
+import { AGENT_COMMAND_LIST, HELP_TEXT } from "./chat-commands";
+import { formatForChannel, splitForChannel } from "./chat-format";
 import {
   WALLET_CALLBACK_PATTERN,
   parseWalletCallback,
   walletKeyboard,
   type WalletPrompt,
-} from "./wallet-prompt";
+} from "./wallet-choice";
 
 async function resolveToken(): Promise<string | null> {
   const fromEnv = process.env.TELEGRAM_BOT_TOKEN?.trim();
@@ -97,6 +99,19 @@ export async function startEmbeddedTelegramBot() {
     }
   }
 
+  async function replyAgent(ctx: Context, reply: { text: string; walletPrompt?: WalletPrompt }) {
+    const chunks = splitForChannel(formatForChannel(reply.text, "TELEGRAM"), 3500);
+    for (let i = 0; i < chunks.length; i++) {
+      const isLast = i === chunks.length - 1;
+      await ctx.reply(chunks[i], {
+        parse_mode: "HTML",
+        ...(isLast && reply.walletPrompt
+          ? { reply_markup: walletKeyboard(reply.walletPrompt) }
+          : {}),
+      });
+    }
+  }
+
   bot.command("start", async (ctx) => {
     await ctx.reply(
       `Ledgerly bot aktif.\nChat ID kamu: ${ctx.from?.id}\n\n` +
@@ -104,6 +119,17 @@ export async function startEmbeddedTelegramBot() {
         `Atau kirim pesan biasa seperti "beli makan 35 ribu"`,
     );
   });
+
+  bot.command("help", async (ctx) => {
+    await ctx.reply(formatForChannel(HELP_TEXT, "TELEGRAM"), { parse_mode: "HTML" });
+  });
+
+  for (const { command, prompt } of AGENT_COMMAND_LIST) {
+    bot.command(command, async (ctx) => {
+      await ctx.replyWithChatAction("typing");
+      await replyAgent(ctx, await askAgent(String(ctx.from?.id ?? ""), prompt));
+    });
+  }
 
   bot.callbackQuery(/^access:(approve|reject):([a-zA-Z0-9]{4,16})$/, async (ctx) => {
     const [, action, code] = ctx.match as unknown as string[];
@@ -140,7 +166,7 @@ export async function startEmbeddedTelegramBot() {
     const text = ctx.message.text.trim();
     if (text.startsWith("/")) return;
 
-    const confirmation = parseTelegramAccessConfirmation(text);
+    const confirmation = parseAccessConfirmation(text);
     if (confirmation) {
       await ctx.reply(await confirmAccess(confirmation.action, confirmation.code));
       return;
@@ -148,11 +174,7 @@ export async function startEmbeddedTelegramBot() {
 
     const id = String(ctx.from?.id ?? "");
     await ctx.replyWithChatAction("typing");
-    const reply = await askAgent(id, text);
-    await ctx.reply(
-      reply.text,
-      reply.walletPrompt ? { reply_markup: walletKeyboard(reply.walletPrompt) } : {},
-    );
+    await replyAgent(ctx, await askAgent(id, text));
   });
 
   bot.catch((err) => {

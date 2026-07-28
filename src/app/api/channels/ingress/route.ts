@@ -5,6 +5,7 @@ import { resolveAiConfig } from "@/ai/resolve-config";
 import { prisma } from "@/lib/db";
 import { phonesMatch } from "@/lib/phone";
 import { rateLimit } from "@/lib/rate-limit";
+import { settlePendingWalletReply } from "@/messaging/settle-wallet-reply";
 
 const payloadSchema = z.object({
   channel: z.enum(["WHATSAPP", "TELEGRAM"]),
@@ -54,6 +55,19 @@ export async function POST(request: Request) {
     }
 
     const config = await resolveAiConfig(link.userId);
+
+    // A pending wallet choice is resolved here rather than by the model, so a
+    // bare "2" can never be matched to the wrong account. Unrecognised replies
+    // fall through and are treated as an ordinary message.
+    const settled = await settlePendingWalletReply({
+      userId: link.userId,
+      channel: body.channel,
+      reply: body.message,
+    });
+    if (settled) {
+      return NextResponse.json({ ok: true, data: { text: settled, toolsUsed: [] } });
+    }
+
     const reply = await runFinanceAgent({
       userId: link.userId,
       message: body.message,
@@ -64,8 +78,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       data: { text: reply.text, toolsUsed: reply.toolsUsed, walletPrompt: reply.walletPrompt },
-    });
-  } catch (error) {
+    });  } catch (error) {
     console.error("[ingress] error:", error);
     const message =
       error instanceof z.ZodError

@@ -100,22 +100,23 @@ export async function executeTool(
         const date = resolveTransactionDate(args.transactionDate, currentTime.isoDate);
         const walletId = args.walletId ? String(args.walletId) : undefined;
 
-        // With several accounts open and none named, guessing would silently
-        // debit the wrong balance. Ask first instead of recording blind.
-        if (!walletId && channel !== "WEB") {
+        if (!walletId) {
           const wallets = await listActiveWalletChoices(userId);
-          if (wallets.length > 1) {
-            // Only Telegram can render buttons, so only there is the draft held
-            // server-side. On WhatsApp the agent asks in text and the user's
-            // reply resolves the wallet on the next turn.
-            if (channel !== "TELEGRAM") {
-              return {
-                status: "AWAITING_WALLET_CHOICE",
-                wallets,
-                note: "Transaksi belum dicatat. Tanyakan rekening mana yang dipakai dengan menyebut pilihannya, lalu catat ulang dengan walletId setelah user menjawab.",
-              };
-            }
 
+          // Every balance is derived from transactions, so a transaction with no
+          // account behind it can never be reflected anywhere. Refuse instead.
+          if (wallets.length === 0) {
+            return {
+              status: "NO_WALLET",
+              error:
+                "Belum ada rekening aktif. Transaksi tidak dicatat sampai user membuat minimal satu rekening.",
+              note: "Jangan catat transaksi ini. Minta user membuat rekening dulu (sebutkan nama bank, mata uang, dan saldo awal jika ada), lalu tawarkan untuk mencatat ulang transaksinya setelah rekening jadi.",
+            };
+          }
+
+          // Guessing between several accounts would silently move the wrong
+          // balance, so hold the draft and let the user choose.
+          if (wallets.length > 1 && channel !== "WEB") {
             const pending = await createPendingTransaction({
               userId,
               channel,
@@ -137,7 +138,7 @@ export async function executeTool(
                 wallets,
               },
               status: "AWAITING_WALLET_CHOICE",
-              note: "Transaksi belum dicatat. Tombol pilihan rekening sudah dikirim ke user. Minta user menekan salah satu tombol, jangan sebut daftar rekening lagi, dan jangan bilang transaksi sudah tercatat.",
+              note: "Transaksi belum dicatat. Pilihan rekening sudah dikirim ke user beserta caranya memilih. Minta user memilih rekening, jangan sebut ulang daftar rekeningnya, dan jangan bilang transaksi sudah tercatat.",
             } satisfies WalletPromptToolResult;
           }
         }

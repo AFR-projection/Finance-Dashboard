@@ -2,14 +2,15 @@ import { Bot, GrammyError, HttpError, type Context } from "grammy";
 import { loadEnvConfig } from "@next/env";
 import pino from "pino";
 import { prisma } from "../../src/lib/db";
-import { parseTelegramAccessConfirmation } from "../../src/messaging/telegram-access-command";
+import { parseAccessConfirmation } from "../../src/messaging/access-command";
+import { AGENT_COMMAND_LIST, HELP_TEXT } from "../../src/messaging/chat-commands";
 import { formatForChannel, splitForChannel } from "../../src/messaging/chat-format";
 import {
   WALLET_CALLBACK_PATTERN,
   parseWalletCallback,
   walletKeyboard,
   type WalletPrompt,
-} from "../../src/messaging/wallet-prompt";
+} from "../../src/messaging/wallet-choice";
 
 type AgentReplyPayload = { text: string; walletPrompt?: WalletPrompt };
 
@@ -174,23 +175,7 @@ async function main() {
   });
 
   bot.command("help", async (ctx) => {
-    await ctx.reply(
-      "*Contoh Pesan:*\n" +
-        "• beli makan 35 ribu\n" +
-        "• gaji masuk 7 juta\n" +
-        "• cek pengeluaran bulan ini\n" +
-        "• buatkan laporan keuangan\n" +
-        "• budget makanan 500 ribu\n" +
-        "• target nabung 5 juta\n\n" +
-        "*Commands:*\n" +
-        "/link KODE\n" +
-        "/approve KODE\n" +
-        "/reject KODE\n" +
-        "/report\n" +
-        "/balance\n" +
-        "/expense",
-      { parse_mode: "Markdown" },
-    );
+    await ctx.reply(formatForChannel(HELP_TEXT, "TELEGRAM"), { parse_mode: "HTML" });
   });
 
   bot.callbackQuery(/^access:(approve|reject):([a-zA-Z0-9]{4,16})$/, async (ctx) => {
@@ -232,35 +217,12 @@ async function main() {
     await ctx.reply(text);
   });
 
-  bot.command("report", async (ctx) => {
-    await ctx.replyWithChatAction("typing");
-    await replyAgent(
-      ctx,
-      await askAgent(String(ctx.from?.id ?? ""), "Buatkan laporan keuangan 30 hari terakhir"),
-    );
-  });
-
-  bot.command("balance", async (ctx) => {
-    await ctx.replyWithChatAction("typing");
-    await replyAgent(
-      ctx,
-      await askAgent(
-        String(ctx.from?.id ?? ""),
-        "Berapa ringkasan saldo, income, dan expense bulan ini?",
-      ),
-    );
-  });
-
-  bot.command("expense", async (ctx) => {
-    await ctx.replyWithChatAction("typing");
-    await replyAgent(
-      ctx,
-      await askAgent(
-        String(ctx.from?.id ?? ""),
-        "Analisis pengeluaran saya bulan ini dan kategori terbesar",
-      ),
-    );
-  });
+  for (const { command, prompt } of AGENT_COMMAND_LIST) {
+    bot.command(command, async (ctx) => {
+      await ctx.replyWithChatAction("typing");
+      await replyAgent(ctx, await askAgent(String(ctx.from?.id ?? ""), prompt));
+    });
+  }
 
   bot.on("message:text", async (ctx) => {
     if (ctx.message.text.startsWith("/")) return;
@@ -273,7 +235,7 @@ async function main() {
       return;
     }
 
-    const confirmation = parseTelegramAccessConfirmation(ctx.message.text);
+    const confirmation = parseAccessConfirmation(ctx.message.text);
     if (confirmation) {
       await ctx.reply(await confirmLogin(confirmation.action, confirmation.code));
       return;
@@ -294,6 +256,13 @@ async function main() {
   // Long polling and webhooks are mutually exclusive. A stale webhook from an
   // earlier deployment otherwise makes the bot appear completely silent.
   await bot.api.deleteWebhook({ drop_pending_updates: false });
+  await bot.api
+    .setMyCommands([
+      { command: "link", description: "Tautkan akun dengan kode pairing" },
+      ...AGENT_COMMAND_LIST.map(({ command, description }) => ({ command, description })),
+      { command: "help", description: "Bantuan & contoh pesan" },
+    ])
+    .catch((err) => log.warn({ err }, "Gagal mendaftarkan menu command"));
   await bot.start({
     onStart: (info) => log.info(`Telegram bot @${info.username} started`),
   });

@@ -8,6 +8,7 @@ import {
   confirmPendingTransaction,
   purgeExpiredPendingTransactions,
 } from "@/messaging/pending-transaction";
+import { recordedTransactionText } from "@/messaging/wallet-choice";
 
 const schema = z.object({
   channel: z.enum(["WHATSAPP", "TELEGRAM"]),
@@ -25,18 +26,6 @@ async function findChannelLink(channel: "WHATSAPP" | "TELEGRAM", externalId: str
 
   const candidates = await prisma.channelLink.findMany({ where: { channel, isActive: true } });
   return candidates.find((candidate) => phonesMatch(candidate.externalId, externalId)) ?? null;
-}
-
-function formatAmount(amount: number, currency: string) {
-  try {
-    return new Intl.NumberFormat("id-ID", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: currency === "IDR" ? 0 : 2,
-    }).format(amount);
-  } catch {
-    return `${currency} ${amount.toLocaleString("id-ID")}`;
-  }
 }
 
 /** Called by the chat workers when the user taps a wallet button. */
@@ -97,14 +86,17 @@ export async function POST(request: Request) {
       });
     }
 
-    const sign = transaction.type === "INCOME" ? "Pemasukan" : "Pengeluaran";
     return NextResponse.json({
       ok: true,
       data: {
-        text:
-          `✅ ${sign} tercatat di ${wallet.name}\n` +
-          `${formatAmount(transaction.amount, wallet.currency)} • ${transaction.category?.name ?? "Lainnya"}\n` +
-          `${transaction.description}`,
+        text: recordedTransactionText({
+          type: transaction.type,
+          amount: transaction.amount,
+          walletName: wallet.name,
+          currency: wallet.currency,
+          categoryName: transaction.category?.name ?? null,
+          description: transaction.description,
+        }),
       },
     });
   } catch (error) {
