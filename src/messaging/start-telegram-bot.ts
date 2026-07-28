@@ -72,6 +72,15 @@ export async function startEmbeddedTelegramBot() {
     );
   });
 
+  bot.callbackQuery(/^access:(approve|reject):([a-zA-Z0-9]{4,16})$/, async (ctx) => {
+    const [, action, code] = ctx.match as unknown as string[];
+    const text = await confirmAccess(action as "approve" | "reject", code);
+    await ctx.answerCallbackQuery({ text: text.slice(0, 200) });
+    // Drop the buttons so the same approval cannot be tapped twice.
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+    await ctx.reply(text);
+  });
+
   bot.command("approve", async (ctx) => {
     const code = ctx.match?.trim();
     if (!code) return ctx.reply("Format: /approve KODE");

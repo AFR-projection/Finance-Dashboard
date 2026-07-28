@@ -4,8 +4,9 @@ import { getAppConfig, notifyOwner } from "@/lib/app-config";
 import {
   accessTtlSeconds,
   newAccessIds,
-  saveAccessChallenge,
+  createAccessChallenge,
   getAccessChallenge,
+  purgeExpiredAccessChallenges,
 } from "@/lib/access-challenge";
 import { logSuspiciousLogin } from "@/lib/security-log";
 import { rateLimit } from "@/lib/rate-limit";
@@ -44,7 +45,8 @@ export async function POST(request: Request) {
   const ua = request.headers.get("user-agent") || "unknown";
   const { sessionId, confirmCode } = newAccessIds();
 
-  await saveAccessChallenge({
+  await purgeExpiredAccessChallenges();
+  await createAccessChallenge({
     sessionId,
     confirmCode,
     fingerprintId: body.fingerprintId,
@@ -52,8 +54,6 @@ export async function POST(request: Request) {
     ip,
     country: geo.country,
     city: geo.city,
-    status: "pending",
-    createdAt: Date.now(),
   });
 
   const msg =
@@ -62,12 +62,12 @@ export async function POST(request: Request) {
     `IP: ${ip}${geo.city || geo.country ? ` (${[geo.city, geo.country].filter(Boolean).join(", ")})` : ""}\n` +
     `Perangkat: ${ua.slice(0, 120)}\n` +
     `Fingerprint: ${body.fingerprintId.slice(0, 12)}…\n\n` +
-    `Izinkan: /approve ${confirmCode}\n` +
-    `Tolak: /reject ${confirmCode}\n` +
-    `(atau kirim kode saja: ${confirmCode})\n` +
+    `Tekan tombol di bawah, atau balas: /approve ${confirmCode}\n` +
     `Berlaku ~${Math.round(accessTtlSeconds() / 60)} menit.`;
 
-  const notified = await notifyOwner(msg);
+  const notified = await notifyOwner(msg, {
+    approveCode: confirmCode,
+  });
   logSuspiciousLogin({
     type: "access_requested",
     ip,
@@ -80,12 +80,14 @@ export async function POST(request: Request) {
     ok: true,
     data: {
       sessionId,
-      confirmCode,
+      // Telegram gets tap-to-approve buttons, so the code never needs to reach
+      // the browser. WhatsApp has no buttons — the owner must read it and reply.
+      confirmCode: notified.channel === "WHATSAPP" ? confirmCode : null,
       ttlSeconds: accessTtlSeconds(),
       notifiedVia: notified.channel,
       message:
         notified.channel === "TELEGRAM"
-          ? "Notifikasi terkirim ke Telegram owner. Menunggu izin…"
+          ? "Notifikasi terkirim ke Telegram owner. Tekan Izinkan di bot…"
           : "Balas di WhatsApp bot: approve KODE (atau reject KODE).",
     },
   });

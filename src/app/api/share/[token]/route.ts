@@ -18,7 +18,7 @@ export async function GET(_request: Request, { params }: Params) {
   const overview = await FinanceEngine.getOverview(profile.userId);
   const cashflow = profile.showCharts
     ? await FinanceEngine.getCashflowSeries(profile.userId, 6)
-    : [];
+    : { currency: overview.currency, series: [] };
   const goals = profile.showGoals ? await FinanceEngine.listGoals(profile.userId) : [];
 
   return NextResponse.json({
@@ -27,6 +27,7 @@ export async function GET(_request: Request, { params }: Params) {
       displayName: profile.displayName || profile.user.name || "Finance Profile",
       avatar: profile.user.image,
       visibility: profile.visibility,
+      currency: overview.currency,
       balance: profile.showBalance ? overview.balance : null,
       totalIncome: profile.showIncome ? overview.totalIncome : null,
       totalExpense: profile.showExpense ? overview.totalExpense : null,

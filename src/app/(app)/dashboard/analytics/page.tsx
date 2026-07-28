@@ -19,7 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function AnalyticsPage() {
   const [data, setData] = useState<{
-    cashflow: Array<{ label: string; income: number; expense: number }>;
+    cashflow: { currency: string; series: Array<{ label: string; income: number; expense: number }> };
     overview: { topCategories: Array<{ name: string; amount: number; color: string }> };
   } | null>(null);
 
@@ -41,15 +41,15 @@ export default function AnalyticsPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="border-border/60 bg-white/70 shadow-none">
           <CardHeader>
-            <CardTitle>Income vs Expense</CardTitle>
+            <CardTitle>Income vs Expense · {data.cashflow.currency}</CardTitle>
           </CardHeader>
           <CardContent className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data.cashflow}>
+              <BarChart data={data.cashflow.series}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#d6ddd8" />
                 <XAxis dataKey="label" />
                 <YAxis />
-                <Tooltip formatter={(v) => formatCurrency(Number(v))} />
+                <Tooltip formatter={(v) => formatCurrency(Number(v), data.cashflow.currency)} />
                 <Legend />
                 <Bar dataKey="income" fill="#0F766E" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="expense" fill="#B45309" radius={[4, 4, 0, 0]} />

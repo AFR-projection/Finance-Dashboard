@@ -21,7 +21,8 @@ type ShareData = {
   totalExpense: number | null;
   savingRate: number | null;
   healthScore: number;
-  cashflow: Array<{ label: string; income: number; expense: number }>;
+  cashflow: { currency: string; series: Array<{ label: string; income: number; expense: number }> };
+  currency: string;
   topCategories: Array<{ name: string; amount: number }>;
   goals: Array<{ goalName: string; targetAmount: number; currentAmount: number }>;
 };
@@ -75,7 +76,7 @@ export default function PublicSharePage() {
                 <CardTitle className="text-sm text-muted-foreground">Balance</CardTitle>
               </CardHeader>
               <CardContent className="text-xl font-semibold">
-                {formatCurrency(data.balance)}
+                {formatCurrency(data.balance, data.currency)}
               </CardContent>
             </Card>
           )}
@@ -85,7 +86,7 @@ export default function PublicSharePage() {
                 <CardTitle className="text-sm text-muted-foreground">Income</CardTitle>
               </CardHeader>
               <CardContent className="text-xl font-semibold">
-                {formatCurrency(data.totalIncome)}
+                {formatCurrency(data.totalIncome, data.currency)}
               </CardContent>
             </Card>
           )}
@@ -95,24 +96,24 @@ export default function PublicSharePage() {
                 <CardTitle className="text-sm text-muted-foreground">Expense</CardTitle>
               </CardHeader>
               <CardContent className="text-xl font-semibold">
-                {formatCurrency(data.totalExpense)}
+                {formatCurrency(data.totalExpense, data.currency)}
               </CardContent>
             </Card>
           )}
         </div>
 
-        {data.cashflow.length > 0 && (
+        {data.cashflow.series.length > 0 && (
           <Card className="border-border/60 bg-white/70 shadow-none">
             <CardHeader>
-              <CardTitle>Cashflow</CardTitle>
+              <CardTitle>Cashflow · {data.cashflow.currency}</CardTitle>
             </CardHeader>
             <CardContent className="h-72">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data.cashflow}>
+                <BarChart data={data.cashflow.series}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="label" />
                   <YAxis />
-                  <Tooltip formatter={(v) => formatCurrency(Number(v))} />
+                  <Tooltip formatter={(v) => formatCurrency(Number(v), data.cashflow.currency)} />
                   <Bar dataKey="income" fill="#0F766E" />
                   <Bar dataKey="expense" fill="#B45309" />
                 </BarChart>
@@ -131,7 +132,7 @@ export default function PublicSharePage() {
                 <div key={g.goalName} className="flex justify-between text-sm">
                   <span>{g.goalName}</span>
                   <span>
-                    {formatCurrency(g.currentAmount)} / {formatCurrency(g.targetAmount)}
+                    {formatCurrency(g.currentAmount, data.currency)} / {formatCurrency(g.targetAmount, data.currency)}
                   </span>
                 </div>
               ))}

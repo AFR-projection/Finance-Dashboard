@@ -28,9 +28,9 @@ export default function AccessPage() {
       const json = await res.json();
       if (!json.ok) {
         if (json.error?.code === "REVALIDATE") {
-          setConfirmCode(json.error.confirmCode || confirmCode);
           setMessage(json.error.message);
-          setPhase("waiting");
+          setPhase("denied");
+          setError(json.error.message);
           return;
         }
         setError(json.error?.message || "Gagal membuka sesi");
@@ -40,7 +40,7 @@ export default function AccessPage() {
       router.replace("/dashboard");
       router.refresh();
     },
-    [confirmCode, router],
+    [router],
   );
 
   useEffect(() => {
@@ -144,7 +144,9 @@ export default function AccessPage() {
               </p>
             )}
             <p className="text-xs text-muted-foreground animate-pulse">
-              Menunggu /approve dari bot…
+              {confirmCode
+                ? "Menunggu balasan approve dari bot…"
+                : "Menunggu owner menekan Izinkan di Telegram…"}
             </p>
           </>
         )}

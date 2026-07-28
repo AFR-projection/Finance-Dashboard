@@ -1,7 +1,16 @@
+import { redirect } from "next/navigation";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { MobileNav } from "@/components/layout/mobile-nav";
+import { getAccessSession, touchAccessSession } from "@/lib/access-session";
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export const dynamic = "force-dynamic";
+
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  // proxy.ts only checks the signature; revocation is enforced here.
+  const session = await getAccessSession();
+  if (!session) redirect("/access");
+  await touchAccessSession(session.sessionId);
+
   return (
     <div className="flex min-h-screen bg-[oklch(0.97_0.008_145)]">
       <div className="sticky top-0 hidden h-screen md:block">

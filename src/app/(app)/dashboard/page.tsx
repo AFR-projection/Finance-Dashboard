@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 type DashboardData = {
   overview: {
+    currency: string;
     totalIncome: number;
     totalExpense: number;
     balance: number;
@@ -26,8 +27,15 @@ type DashboardData = {
     healthScore: number;
     expenseChangePct: number;
     topCategories: Array<{ name: string; amount: number; color: string }>;
+    byCurrency: Array<{
+      currency: string;
+      totalIncome: number;
+      totalExpense: number;
+      balance: number;
+      savingRate: number;
+    }>;
   };
-  cashflow: Array<{ label: string; income: number; expense: number }>;
+  cashflow: { currency: string; series: Array<{ label: string; income: number; expense: number }> };
   budgets: {
     budgets: Array<{
       categoryName: string;
@@ -42,6 +50,14 @@ type DashboardData = {
     projectedBalance: number;
     riskOverspend: boolean;
   };
+  wallets: Array<{
+    id: string;
+    name: string;
+    currency: string;
+    color: string | null;
+    isDefault: boolean;
+    balance: number;
+  }>;
 };
 
 export default function OverviewPage() {
@@ -70,12 +86,8 @@ export default function OverviewPage() {
 
   if (!data) return <p>Gagal memuat dashboard.</p>;
 
-  const metrics = [
-    { label: "Balance", value: formatCurrency(data.overview.balance) },
-    { label: "Income", value: formatCurrency(data.overview.totalIncome) },
-    { label: "Expense", value: formatCurrency(data.overview.totalExpense) },
-    { label: "Saving rate", value: `${data.overview.savingRate}%` },
-  ];
+  const currencies = data.overview.byCurrency;
+  const multiCurrency = currencies.length > 1;
 
   return (
     <div className="space-y-8">
@@ -84,34 +96,84 @@ export default function OverviewPage() {
         <p className="text-muted-foreground">Ringkasan kesehatan keuangan bulan ini.</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {metrics.map((m, i) => (
-          <motion.div
-            key={m.label}
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.06 }}
-          >
-            <Card className="border-border/60 bg-white/70 shadow-none backdrop-blur">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">{m.label}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-semibold tracking-tight">{m.value}</div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        ))}
-      </div>
+      {currencies.map((c, ci) => (
+        <div key={c.currency} className="space-y-3">
+          {multiCurrency && (
+            <h2 className="text-sm font-medium text-muted-foreground">Ringkasan {c.currency}</h2>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              { label: "Balance", value: formatCurrency(c.balance, c.currency) },
+              { label: "Income", value: formatCurrency(c.totalIncome, c.currency) },
+              { label: "Expense", value: formatCurrency(c.totalExpense, c.currency) },
+              { label: "Saving rate", value: `${c.savingRate}%` },
+            ].map((m, i) => (
+              <motion.div
+                key={m.label}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: ci * 0.08 + i * 0.06 }}
+              >
+                <Card className="border-border/60 bg-white/70 shadow-none backdrop-blur">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      {m.label}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-semibold tracking-tight">{m.value}</div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {data.wallets.length > 0 && (
+        <div>
+          <h2 className="mb-3 text-sm font-medium text-muted-foreground">Saldo per rekening</h2>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {data.wallets.map((w, i) => (
+              <motion.div
+                key={w.id}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.05 }}
+              >
+                <Card className="relative overflow-hidden border-border/60 bg-white/70 shadow-none backdrop-blur">
+                  <div
+                    className="absolute inset-y-0 left-0 w-1"
+                    style={{ background: w.color ?? "#0F766E" }}
+                  />
+                  <CardHeader className="pb-2 pl-5">
+                    <div className="flex items-center justify-between gap-2">
+                      <CardTitle className="text-sm font-medium">{w.name}</CardTitle>
+                      <Badge variant="secondary" className="shrink-0">
+                        {w.currency}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="pl-5">
+                    <div className="text-xl font-semibold tabular-nums tracking-tight">
+                      {formatCurrency(w.balance, w.currency)}
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="border-border/60 bg-white/70 shadow-none backdrop-blur lg:col-span-2">
           <CardHeader>
-            <CardTitle>Cashflow</CardTitle>
+            <CardTitle>Cashflow · {data.cashflow.currency}</CardTitle>
           </CardHeader>
           <CardContent className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data.cashflow}>
+              <AreaChart data={data.cashflow.series}>
                 <defs>
                   <linearGradient id="inc" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#0F766E" stopOpacity={0.35} />
@@ -125,7 +187,7 @@ export default function OverviewPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#d6ddd8" />
                 <XAxis dataKey="label" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip formatter={(v) => formatCurrency(Number(v))} />
+                <Tooltip formatter={(v) => formatCurrency(Number(v), data.cashflow.currency)} />
                 <Area type="monotone" dataKey="income" stroke="#0F766E" fill="url(#inc)" />
                 <Area type="monotone" dataKey="expense" stroke="#B45309" fill="url(#exp)" />
               </AreaChart>

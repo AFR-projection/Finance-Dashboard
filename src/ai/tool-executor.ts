@@ -101,6 +101,7 @@ export async function executeTool(
           transactionDate: date,
           channel,
           rawInput: args.rawInput ? String(args.rawInput) : undefined,
+          walletId: args.walletId ? String(args.walletId) : undefined,
         });
       }
 
@@ -110,6 +111,7 @@ export async function executeTool(
           search: args.search ? String(args.search) : undefined,
           from: daysAgo(Number(args.days ?? 30)),
           limit: Number(args.limit ?? 20),
+          walletId: args.walletId ? String(args.walletId) : undefined,
         });
 
       case "deleteTransaction": {
@@ -198,10 +200,11 @@ export async function executeTool(
 
       case "analyzeCashflowTrend": {
         const months = Number(args.months ?? 6);
-        const series = await FinanceEngine.getCashflowSeries(userId, months);
+        const { currency, series } = await FinanceEngine.getCashflowSeries(userId, months);
         const avgIncome = series.reduce((s, m) => s + m.income, 0) / series.length;
         const avgExpense = series.reduce((s, m) => s + m.expense, 0) / series.length;
         return {
+          currency,
           months: series,
           avgMonthlyIncome: Math.round(avgIncome),
           avgMonthlyExpense: Math.round(avgExpense),
@@ -459,6 +462,36 @@ export async function executeTool(
 
       case "recallMemories":
         return FinanceEngine.listAiMemories(userId);
+
+      case "manageWallet": {
+        const action = String(args.action ?? "list");
+        if (action === "list") return FinanceEngine.listWallets(userId);
+        if (action === "create") {
+          return FinanceEngine.createWallet(userId, {
+            name: String(args.name ?? ""),
+            currency: String(args.currency ?? "IDR"),
+            color: args.color ? String(args.color) : undefined,
+            isDefault: args.isDefault === true,
+          });
+        }
+        if (action === "update") {
+          const id = String(args.id ?? "");
+          if (!id) return { error: "Wallet ID required for update" };
+          return FinanceEngine.updateWallet(userId, {
+            id,
+            name: args.name ? String(args.name) : undefined,
+            currency: args.currency ? String(args.currency) : undefined,
+            color: args.color ? String(args.color) : undefined,
+            isDefault: args.isDefault !== undefined ? Boolean(args.isDefault) : undefined,
+          });
+        }
+        if (action === "delete") {
+          const id = String(args.id ?? "");
+          if (!id) return { error: "Wallet ID required for delete" };
+          return FinanceEngine.deleteWallet(userId, id);
+        }
+        return { error: `Unknown action: ${action}. Use list, create, update, or delete.` };
+      }
 
       default:
         throw new Error(`Unknown tool: ${name}`);

@@ -6,13 +6,14 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const from = searchParams.get("from") ? new Date(searchParams.get("from")!) : undefined;
     const to = searchParams.get("to") ? new Date(searchParams.get("to")!) : undefined;
-    const [overview, cashflow, budgets, prediction, goals] = await Promise.all([
+    const [overview, cashflow, budgets, prediction, goals, wallets] = await Promise.all([
       FinanceEngine.getOverview(userId, from, to),
       FinanceEngine.getCashflowSeries(userId, 6),
       FinanceEngine.analyzeBudget(userId),
       FinanceEngine.predictMonthEnd(userId),
       FinanceEngine.listGoals(userId),
+      FinanceEngine.listWallets(userId),
     ]);
-    return jsonOk({ overview, cashflow, budgets, prediction, goals });
+    return jsonOk({ overview, cashflow, budgets, prediction, goals, wallets });
   });
 }

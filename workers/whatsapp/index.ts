@@ -15,6 +15,7 @@ import { Boom } from "@hapi/boom";
 import nextEnv from "@next/env";
 import fs from "fs";
 import path from "path";
+import { formatForChannel, splitForChannel } from "../../src/messaging/chat-format";
 
 nextEnv.loadEnvConfig(process.cwd());
 
@@ -207,13 +208,8 @@ async function startSock(): Promise<WASocket> {
       try {
         await sock.sendMessage(jid, { text: "_Ledgerly sedang memproses..._" });
         const reply = await processMessage(phone, text.trim());
-        if (reply.length > 4000) {
-          const chunks = reply.match(/.{1,4000}/gs) ?? [];
-          for (const chunk of chunks) {
-            await sock.sendMessage(jid, { text: chunk });
-          }
-        } else {
-          await sock.sendMessage(jid, { text: reply });
+        for (const chunk of splitForChannel(formatForChannel(reply, "WHATSAPP"), 3500)) {
+          await sock.sendMessage(jid, { text: chunk });
         }
       } catch (error) {
         log.error(error, "Failed processing WhatsApp message");

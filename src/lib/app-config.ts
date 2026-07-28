@@ -193,15 +193,30 @@ export async function updateOwnerBotConfig(input: {
   return getAppConfig();
 }
 
-export async function notifyOwner(message: string) {
+export async function notifyOwner(
+  message: string,
+  options: { approveCode?: string } = {},
+) {
   const cfg = await getAppConfigRaw();
   if (cfg.telegramBotToken && cfg.telegramOwnerChatId) {
+    const reply_markup = options.approveCode
+      ? {
+          inline_keyboard: [
+            [
+              { text: "✅ Izinkan", callback_data: `access:approve:${options.approveCode}` },
+              { text: "⛔ Tolak", callback_data: `access:reject:${options.approveCode}` },
+            ],
+          ],
+        }
+      : undefined;
+
     await fetch(`https://api.telegram.org/bot${cfg.telegramBotToken}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id: cfg.telegramOwnerChatId,
         text: message,
+        ...(reply_markup ? { reply_markup } : {}),
       }),
     });
     return { channel: "TELEGRAM" as const };

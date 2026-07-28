@@ -3,6 +3,7 @@ import { loadEnvConfig } from "@next/env";
 import pino from "pino";
 import { prisma } from "../../src/lib/db";
 import { parseTelegramAccessConfirmation } from "../../src/messaging/telegram-access-command";
+import { formatForChannel, splitForChannel } from "../../src/messaging/chat-format";
 
 loadEnvConfig(process.cwd());
 
@@ -142,6 +143,15 @@ async function main() {
     );
   });
 
+  bot.callbackQuery(/^access:(approve|reject):([a-zA-Z0-9]{4,16})$/, async (ctx) => {
+    const [, action, code] = ctx.match as unknown as string[];
+    const text = await confirmLogin(action as "approve" | "reject", code);
+    await ctx.answerCallbackQuery({ text: text.slice(0, 200) });
+    // Drop the buttons so the same approval cannot be tapped twice.
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+    await ctx.reply(text);
+  });
+
   bot.command("approve", async (ctx) => {
     const code = ctx.match?.trim();
     if (!code) return ctx.reply("Format: /approve KODE");
@@ -202,13 +212,8 @@ async function main() {
 
     await ctx.replyWithChatAction("typing");
     const reply = await askAgent(id, ctx.message.text);
-    if (reply.length > 4000) {
-      const chunks = reply.match(/.{1,4000}/gs) ?? [];
-      for (const chunk of chunks) {
-        await ctx.reply(chunk);
-      }
-    } else {
-      await ctx.reply(reply);
+    for (const chunk of splitForChannel(formatForChannel(reply, "TELEGRAM"), 3500)) {
+      await ctx.reply(chunk, { parse_mode: "HTML" });
     }
   });
 

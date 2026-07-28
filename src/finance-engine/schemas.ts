@@ -7,6 +7,7 @@ export const createTransactionSchema = z.object({
   amount: z.coerce.number().positive("Amount must be greater than 0"),
   category: z.string().min(1).max(80).optional(),
   categoryId: z.string().cuid().optional(),
+  walletId: z.string().cuid().optional(),
   subCategory: z.string().max(80).optional().nullable(),
   description: z.string().min(1).max(500),
   paymentMethod: z.string().max(80).optional().nullable(),
@@ -22,6 +23,7 @@ export const updateTransactionSchema = createTransactionSchema.partial().extend(
 export const listTransactionsSchema = z.object({
   type: transactionTypeSchema.optional(),
   categoryId: z.string().cuid().optional(),
+  walletId: z.string().cuid().optional(),
   search: z.string().max(200).optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
@@ -75,5 +77,19 @@ export const agentMessageSchema = z.object({
   channel: z.enum(["WHATSAPP", "TELEGRAM", "WEB"]).default("WEB"),
 });
 
+export const createWalletSchema = z.object({
+  name: z.string().min(1).max(80),
+  currency: z.string().length(3).toUpperCase(),
+  color: z.string().optional(),
+  isDefault: z.boolean().optional(),
+});
+
+export const updateWalletSchema = createWalletSchema.partial().extend({
+  id: z.string().cuid(),
+  isActive: z.boolean().optional(),
+});
+
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
 export type ListTransactionsInput = z.infer<typeof listTransactionsSchema>;
+export type CreateWalletInput = z.infer<typeof createWalletSchema>;
+export type UpdateWalletInput = z.infer<typeof updateWalletSchema>;

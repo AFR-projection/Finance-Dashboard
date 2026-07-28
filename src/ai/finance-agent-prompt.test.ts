@@ -22,6 +22,14 @@ describe("buildFinanceAgentSystemPrompt", () => {
     expect(prompt).toContain("1,200 characters or less");
   });
 
+  it("keeps the machinery out of user-facing replies", () => {
+    const prompt = buildFinanceAgentSystemPrompt({ channel: "WHATSAPP", userContext });
+
+    expect(prompt).toContain("Never expose the machinery");
+    expect(prompt).toContain("Never narrate what you are about to do");
+    expect(prompt).toContain("No filler openers");
+  });
+
   it("allows richer structure on the web", () => {
     const prompt = buildFinanceAgentSystemPrompt({ channel: "WEB", userContext });
 

@@ -1,7 +1,7 @@
 export const agentTools = [
   {
     name: "createTransaction",
-    description: "Create income/expense. Convert IDR: 25ribu=25000, 7juta=7000000.",
+    description: "Create income/expense. Convert IDR: 25ribu=25000, 7juta=7000000. Pass walletId to assign to a specific account/rekening.",
     parameters: {
       type: "object",
       properties: {
@@ -11,6 +11,7 @@ export const agentTools = [
         description: { type: "string", description: "Short description" },
         paymentMethod: { type: "string", description: "cash/transfer/qris/card" },
         transactionDate: { type: "string", description: "YYYY-MM-DD. Omit for today — the server fills in the user's local date." },
+        walletId: { type: "string", description: "Wallet/rekening ID. Use manageWallet(list) first to resolve by name or currency." },
       },
       required: ["type", "amount", "category", "description"],
     },
@@ -22,7 +23,7 @@ export const agentTools = [
   },
   {
     name: "getTransactions",
-    description: "Fetch transactions with optional filters. Shows category, amount, date.",
+    description: "Fetch transactions with optional filters. Shows category, amount, date, wallet.",
     parameters: {
       type: "object",
       properties: {
@@ -30,6 +31,7 @@ export const agentTools = [
         search: { type: "string", description: "Search description" },
         days: { type: "number", description: "Days back (default 30)" },
         limit: { type: "number", description: "Max results (default 20)" },
+        walletId: { type: "string", description: "Filter by wallet/rekening ID" },
       },
     },
   },
@@ -190,6 +192,22 @@ export const agentTools = [
     name: "recallMemories",
     description: "Retrieve all saved user preferences, habits, and recurring financial facts from memory.",
     parameters: { type: "object", properties: {} },
+  },
+  {
+    name: "manageWallet",
+    description: "List, create, update, or deactivate financial accounts (rekening/wallet). Each wallet has its own currency — no conversion. Use action=list to resolve a wallet name or currency before passing walletId to createTransaction.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "create", "update", "delete"] },
+        id: { type: "string", description: "Wallet ID — required for update/delete" },
+        name: { type: "string", description: "Account name, e.g. BCA, Jenius, Cash USD" },
+        currency: { type: "string", description: "ISO 4217 code: IDR, USD, SGD, etc." },
+        color: { type: "string", description: "Hex color, e.g. #0F766E" },
+        isDefault: { type: "boolean", description: "Set as default wallet" },
+      },
+      required: ["action"],
+    },
   },
 ] as const;
 

@@ -2,7 +2,8 @@ import { z } from "zod";
 import { NextResponse } from "next/server";
 import {
   getAccessChallengeByCode,
-  updateAccessChallenge,
+  approveAccessChallenge,
+  rejectAccessChallenge,
 } from "@/lib/access-challenge";
 import { getSocketServer } from "@/lib/socket-server";
 import { logSuspiciousLogin } from "@/lib/security-log";
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "reject") {
-      await updateAccessChallenge(challenge.sessionId, { status: "rejected" });
+      await rejectAccessChallenge(challenge.sessionId);
       getSocketServer()?.to(`login:${challenge.sessionId}`).emit("access:rejected", {
         reason: "Akses ditolak oleh owner.",
       });
@@ -53,7 +54,13 @@ export async function POST(request: Request) {
     }
 
     await requireOwnerUserId();
-    await updateAccessChallenge(challenge.sessionId, { status: "approved" });
+    const approved = await approveAccessChallenge(challenge.sessionId);
+    if (!approved) {
+      return NextResponse.json({
+        ok: true,
+        data: { text: "Permintaan ini sudah diproses sebelumnya." },
+      });
+    }
     getSocketServer()?.to(`login:${challenge.sessionId}`).emit("access:approved", {
       sessionId: challenge.sessionId,
     });

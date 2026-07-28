@@ -36,8 +36,11 @@ type Tx = {
   description: string;
   transactionDate: string;
   category: { name: string; color: string } | null;
+  wallet: { id: string; name: string; currency: string } | null;
   channel: string;
 };
+
+type WalletOption = { id: string; name: string; currency: string; isDefault: boolean };
 
 type FormState = {
   id?: string;
@@ -46,7 +49,10 @@ type FormState = {
   category: string;
   description: string;
   transactionDate: string;
+  walletId: string;
 };
+
+const NO_WALLET = "NONE";
 
 const emptyForm = (): FormState => ({
   type: "EXPENSE",
@@ -54,12 +60,15 @@ const emptyForm = (): FormState => ({
   category: "Food",
   description: "",
   transactionDate: new Date().toISOString().slice(0, 10),
+  walletId: NO_WALLET,
 });
 
 export default function TransactionsPage() {
   const [items, setItems] = useState<Tx[]>([]);
+  const [wallets, setWallets] = useState<WalletOption[]>([]);
   const [search, setSearch] = useState("");
   const [type, setType] = useState<string>("ALL");
+  const [walletFilter, setWalletFilter] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm());
@@ -69,6 +78,7 @@ export default function TransactionsPage() {
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (type !== "ALL") params.set("type", type);
+    if (walletFilter !== "ALL") params.set("walletId", walletFilter);
     params.set("limit", "100");
     const res = await fetch(`/api/transactions?${params}`);
     const json = await res.json();
@@ -78,8 +88,11 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     const initial = setTimeout(() => void load(), 0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void fetch("/api/wallets")
+      .then((r) => r.json())
+      .then((j: { data?: WalletOption[] }) => setWallets(j.data ?? []));
     return () => clearTimeout(initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function remove(id: string) {
@@ -89,7 +102,9 @@ export default function TransactionsPage() {
   }
 
   function openCreate() {
-    setForm(emptyForm());
+    const preset = emptyForm();
+    const fallback = wallets.find((w) => w.isDefault) ?? wallets[0];
+    setForm(fallback ? { ...preset, walletId: fallback.id } : preset);
     setOpen(true);
   }
 
@@ -101,6 +116,7 @@ export default function TransactionsPage() {
       category: t.category?.name ?? "Other",
       description: t.description,
       transactionDate: new Date(t.transactionDate).toISOString().slice(0, 10),
+      walletId: t.wallet?.id ?? NO_WALLET,
     });
     setOpen(true);
   }
@@ -114,6 +130,7 @@ export default function TransactionsPage() {
       description: form.description,
       transactionDate: form.transactionDate,
       channel: "WEB" as const,
+      ...(form.walletId !== NO_WALLET ? { walletId: form.walletId } : {}),
     };
 
     const res = form.id
@@ -138,11 +155,11 @@ export default function TransactionsPage() {
   }
 
   function exportCsv() {
-    const header = "date,type,amount,category,description,channel\n";
+    const header = "date,type,amount,currency,wallet,category,description,channel\n";
     const rows = items
       .map(
         (t) =>
-          `${new Date(t.transactionDate).toISOString().slice(0, 10)},${t.type},${t.amount},${t.category?.name ?? ""},"${t.description}",${t.channel}`,
+          `${new Date(t.transactionDate).toISOString().slice(0, 10)},${t.type},${t.amount},${t.wallet?.currency ?? ""},"${t.wallet?.name ?? ""}",${t.category?.name ?? ""},"${t.description}",${t.channel}`,
       )
       .join("\n");
     const blob = new Blob([header + rows], { type: "text/csv" });
@@ -153,14 +170,15 @@ export default function TransactionsPage() {
     a.click();
   }
 
-  const total = useMemo(
-    () =>
-      items.reduce(
-        (s, t) => s + (t.type === "INCOME" ? t.amount : -t.amount),
-        0,
-      ),
-    [items],
-  );
+  // Currencies are never converted, so a single net figure would be meaningless.
+  const netByCurrency = useMemo(() => {
+    const totals: Record<string, number> = {};
+    for (const t of items) {
+      const currency = t.wallet?.currency ?? "IDR";
+      totals[currency] = (totals[currency] ?? 0) + (t.type === "INCOME" ? t.amount : -t.amount);
+    }
+    return Object.entries(totals);
+  }, [items]);
 
   return (
     <div className="space-y-6">
@@ -228,6 +246,25 @@ export default function TransactionsPage() {
                   />
                 </div>
                 <div className="space-y-1">
+                  <Label>Rekening</Label>
+                  <Select
+                    value={form.walletId}
+                    onValueChange={(v) => setForm((f) => ({ ...f, walletId: v ?? NO_WALLET }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_WALLET}>Tanpa rekening</SelectItem>
+                      {wallets.map((w) => (
+                        <SelectItem key={w.id} value={w.id}>
+                          {w.name} · {w.currency}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
                   <Label>Tanggal</Label>
                   <Input
                     type="date"
@@ -264,6 +301,19 @@ export default function TransactionsPage() {
             <SelectItem value="EXPENSE">Expense</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={walletFilter} onValueChange={(v) => setWalletFilter(v ?? "ALL")}>
+          <SelectTrigger className="w-48 bg-white/80">
+            <SelectValue placeholder="Rekening" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">Semua rekening</SelectItem>
+            {wallets.map((w) => (
+              <SelectItem key={w.id} value={w.id}>
+                {w.name} · {w.currency}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button onClick={load}>Apply</Button>
       </div>
 
@@ -274,6 +324,7 @@ export default function TransactionsPage() {
               <TableHead>Date</TableHead>
               <TableHead>Type</TableHead>
               <TableHead>Category</TableHead>
+              <TableHead>Rekening</TableHead>
               <TableHead>Description</TableHead>
               <TableHead className="text-right">Amount</TableHead>
               <TableHead />
@@ -282,12 +333,12 @@ export default function TransactionsPage() {
           <TableBody>
             {loading && (
               <TableRow>
-                <TableCell colSpan={6}>Loading...</TableCell>
+                <TableCell colSpan={7}>Loading...</TableCell>
               </TableRow>
             )}
             {!loading && items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6}>Belum ada transaksi.</TableCell>
+                <TableCell colSpan={7}>Belum ada transaksi.</TableCell>
               </TableRow>
             )}
             {items.map((t) => (
@@ -297,10 +348,17 @@ export default function TransactionsPage() {
                   <Badge variant={t.type === "INCOME" ? "secondary" : "outline"}>{t.type}</Badge>
                 </TableCell>
                 <TableCell>{t.category?.name ?? "—"}</TableCell>
+                <TableCell>
+                  {t.wallet ? (
+                    <Badge variant="secondary">{t.wallet.name} · {t.wallet.currency}</Badge>
+                  ) : (
+                    "—"
+                  )}
+                </TableCell>
                 <TableCell>{t.description}</TableCell>
                 <TableCell className="text-right font-medium">
                   {t.type === "EXPENSE" ? "-" : "+"}
-                  {formatCurrency(t.amount)}
+                  {formatCurrency(t.amount, t.wallet?.currency ?? "IDR")}
                 </TableCell>
                 <TableCell className="space-x-1 text-right">
                   <Button variant="ghost" size="sm" onClick={() => openEdit(t)}>
@@ -315,7 +373,12 @@ export default function TransactionsPage() {
           </TableBody>
         </Table>
       </div>
-      <p className="text-sm text-muted-foreground">Net on page: {formatCurrency(total)}</p>
+      <p className="text-sm text-muted-foreground">
+        Net on page:{" "}
+        {netByCurrency.length === 0
+          ? "—"
+          : netByCurrency.map(([c, v]) => formatCurrency(v, c)).join(" · ")}
+      </p>
     </div>
   );
 }

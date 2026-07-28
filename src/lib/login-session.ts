@@ -22,7 +22,15 @@ export type TemporaryLoginSession = {
 };
 
 const TTL_SECONDS = Number(process.env.LOGIN_SESSION_TTL_SECONDS || 300);
-const memory = new Map<string, { data: TemporaryLoginSession; expiresAt: number }>();
+
+// Survives module re-evaluation on dev hot-reload; see access-challenge.ts.
+const globalForLogin = globalThis as unknown as {
+  loginSessionMemory?: Map<string, { data: TemporaryLoginSession; expiresAt: number }>;
+};
+const memory = (globalForLogin.loginSessionMemory ??= new Map<
+  string,
+  { data: TemporaryLoginSession; expiresAt: number }
+>());
 
 function key(sessionId: string) {
   return `temporary_login_session:${sessionId}`;

@@ -10,10 +10,14 @@ import {
   createBudgetSchema,
   createGoalSchema,
   createTransactionSchema,
+  createWalletSchema,
   listTransactionsSchema,
   updateGoalSchema,
+  updateWalletSchema,
   type CreateTransactionInput,
+  type CreateWalletInput,
   type ListTransactionsInput,
+  type UpdateWalletInput,
 } from "./schemas";
 
 const DEFAULT_CATEGORIES: Array<{
@@ -111,12 +115,20 @@ export async function createTransaction(userId: string, raw: CreateTransactionIn
     input.categoryId,
   );
 
+  let walletId: string | null = null;
+  if (input.walletId) {
+    const wallet = await prisma.wallet.findFirst({ where: { id: input.walletId, userId, isActive: true } });
+    if (!wallet) throw new FinanceEngineError("Wallet not found", "WALLET_NOT_FOUND", 404);
+    walletId = wallet.id;
+  }
+
   const tx = await prisma.transaction.create({
     data: {
       userId,
       type: input.type,
       amount: new Prisma.Decimal(input.amount),
       categoryId,
+      walletId,
       subCategory: input.subCategory ?? null,
       description: input.description,
       paymentMethod: input.paymentMethod ?? null,
@@ -124,7 +136,7 @@ export async function createTransaction(userId: string, raw: CreateTransactionIn
       channel: input.channel as ChannelType,
       rawInput: input.rawInput ?? null,
     },
-    include: { category: true },
+    include: { category: true, wallet: true },
   });
 
   return serializeTransaction(tx);
@@ -145,18 +157,30 @@ export async function updateTransaction(
     categoryId = await resolveCategoryId(userId, type, raw.category, raw.categoryId);
   }
 
+  let walletId = existing.walletId;
+  if (raw.walletId !== undefined) {
+    if (raw.walletId === null) {
+      walletId = null;
+    } else {
+      const wallet = await prisma.wallet.findFirst({ where: { id: raw.walletId, userId, isActive: true } });
+      if (!wallet) throw new FinanceEngineError("Wallet not found", "WALLET_NOT_FOUND", 404);
+      walletId = wallet.id;
+    }
+  }
+
   const tx = await prisma.transaction.update({
     where: { id },
     data: {
       type,
       amount: raw.amount != null ? new Prisma.Decimal(raw.amount) : undefined,
       categoryId,
+      walletId,
       subCategory: raw.subCategory === undefined ? undefined : raw.subCategory,
       description: raw.description,
       paymentMethod: raw.paymentMethod === undefined ? undefined : raw.paymentMethod,
       transactionDate: raw.transactionDate,
     },
-    include: { category: true },
+    include: { category: true, wallet: true },
   });
 
   return serializeTransaction(tx);
@@ -178,6 +202,7 @@ export async function getTransactions(userId: string, raw: Partial<ListTransacti
     userId,
     type: input.type,
     categoryId: input.categoryId,
+    walletId: input.walletId,
     transactionDate: {
       gte: input.from,
       lte: input.to,
@@ -195,7 +220,7 @@ export async function getTransactions(userId: string, raw: Partial<ListTransacti
   const [items, total] = await Promise.all([
     prisma.transaction.findMany({
       where,
-      include: { category: true },
+      include: { category: true, wallet: true },
       orderBy: [{ transactionDate: "desc" }, { createdAt: "desc" }],
       take: input.limit,
       skip: input.offset,
@@ -209,60 +234,136 @@ export async function getTransactions(userId: string, raw: Partial<ListTransacti
   };
 }
 
+type CurrencyBucket = {
+  currency: string;
+  income: number;
+  expense: number;
+  prevExpense: number;
+  byCategory: Record<string, { name: string; amount: number; color: string }>;
+};
+
+const FALLBACK_CURRENCY = "IDR";
+
+async function getPrimaryCurrency(userId: string): Promise<string> {
+  const wallet = await prisma.wallet.findFirst({
+    where: { userId, isActive: true },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+    select: { currency: true },
+  });
+  return wallet?.currency ?? FALLBACK_CURRENCY;
+}
+
+// Transactions without a wallet are treated as primary-currency, matching getOverview.
+async function primaryCurrencyWalletFilter(userId: string) {
+  const currency = await getPrimaryCurrency(userId);
+  const others = await prisma.wallet.findMany({
+    where: { userId, currency: { not: currency } },
+    select: { id: true },
+  });
+  return {
+    currency,
+    where: others.length > 0 ? { walletId: { notIn: others.map((w) => w.id) } } : {},
+  };
+}
+
+function summarizeCurrency(bucket: CurrencyBucket) {
+  const { income, expense, prevExpense } = bucket;
+  const savingRate = income > 0 ? ((income - expense) / income) * 100 : 0;
+  const expenseChangePct =
+    prevExpense > 0 ? ((expense - prevExpense) / prevExpense) * 100 : expense > 0 ? 100 : 0;
+
+  return {
+    currency: bucket.currency,
+    totalIncome: income,
+    totalExpense: expense,
+    balance: income - expense,
+    savingRate: Number(savingRate.toFixed(1)),
+    healthScore: computeHealthScore(income, expense, savingRate),
+    expenseChangePct: Number(expenseChangePct.toFixed(1)),
+    topCategories: Object.values(bucket.byCategory)
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 6),
+  };
+}
+
 export async function getOverview(userId: string, from?: Date, to?: Date) {
   assertUser(userId);
   const rangeFrom = from ?? startOfMonth();
   const rangeTo = to ?? endOfMonth();
 
-  const txs = await prisma.transaction.findMany({
-    where: {
-      userId,
-      transactionDate: { gte: rangeFrom, lte: rangeTo },
-    },
-    include: { category: true },
-  });
+  const primaryCurrency = await getPrimaryCurrency(userId);
 
-  let income = 0;
-  let expense = 0;
-  const byCategory: Record<string, { name: string; amount: number; color: string }> = {};
+  const [txs, prev] = await Promise.all([
+    prisma.transaction.findMany({
+      where: { userId, transactionDate: { gte: rangeFrom, lte: rangeTo } },
+      include: { category: true, wallet: true },
+    }),
+    (async () => {
+      const prevFrom = startOfMonth(new Date(rangeFrom.getFullYear(), rangeFrom.getMonth() - 1, 1));
+      return prisma.transaction.findMany({
+        where: {
+          userId,
+          transactionDate: { gte: prevFrom, lte: endOfMonth(prevFrom) },
+          type: "EXPENSE",
+        },
+        include: { wallet: true },
+      });
+    })(),
+  ]);
+
+  const buckets = new Map<string, CurrencyBucket>();
+  const bucketFor = (currency: string) => {
+    let bucket = buckets.get(currency);
+    if (!bucket) {
+      bucket = { currency, income: 0, expense: 0, prevExpense: 0, byCategory: {} };
+      buckets.set(currency, bucket);
+    }
+    return bucket;
+  };
+  bucketFor(primaryCurrency);
 
   for (const tx of txs) {
+    const bucket = bucketFor(tx.wallet?.currency ?? primaryCurrency);
     const amount = toNumber(tx.amount);
-    if (tx.type === "INCOME") income += amount;
-    else {
-      expense += amount;
-      const key = tx.categoryId ?? "other";
-      const name = tx.category?.name ?? "Other";
-      const color = tx.category?.color ?? "#57534E";
-      byCategory[key] = byCategory[key] ?? { name, amount: 0, color };
-      byCategory[key].amount += amount;
+    if (tx.type === "INCOME") {
+      bucket.income += amount;
+      continue;
     }
+    bucket.expense += amount;
+    const key = tx.categoryId ?? "other";
+    bucket.byCategory[key] = bucket.byCategory[key] ?? {
+      name: tx.category?.name ?? "Other",
+      amount: 0,
+      color: tx.category?.color ?? "#57534E",
+    };
+    bucket.byCategory[key].amount += amount;
   }
 
-  const balance = income - expense;
-  const savingRate = income > 0 ? ((income - expense) / income) * 100 : 0;
-  const healthScore = computeHealthScore(income, expense, savingRate);
+  for (const tx of prev) {
+    bucketFor(tx.wallet?.currency ?? primaryCurrency).prevExpense += toNumber(tx.amount);
+  }
 
-  const prevFrom = startOfMonth(new Date(rangeFrom.getFullYear(), rangeFrom.getMonth() - 1, 1));
-  const prevTo = endOfMonth(prevFrom);
-  const prev = await prisma.transaction.findMany({
-    where: { userId, transactionDate: { gte: prevFrom, lte: prevTo }, type: "EXPENSE" },
-  });
-  const prevExpense = prev.reduce((s, t) => s + toNumber(t.amount), 0);
-  const expenseChangePct =
-    prevExpense > 0 ? ((expense - prevExpense) / prevExpense) * 100 : expense > 0 ? 100 : 0;
+  const byCurrency = [...buckets.values()]
+    .map(summarizeCurrency)
+    .sort((a, b) =>
+      a.currency === primaryCurrency ? -1 : b.currency === primaryCurrency ? 1 : b.totalExpense - a.totalExpense,
+    );
+
+  // Top-level totals stay single-currency: summing across currencies without a
+  // conversion rate would produce a meaningless number.
+  const primary = byCurrency.find((c) => c.currency === primaryCurrency)!;
 
   return {
     period: { from: rangeFrom, to: rangeTo },
-    totalIncome: income,
-    totalExpense: expense,
-    balance,
-    savingRate: Number(savingRate.toFixed(1)),
-    healthScore,
-    expenseChangePct: Number(expenseChangePct.toFixed(1)),
-    topCategories: Object.values(byCategory)
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 6),
+    currency: primaryCurrency,
+    totalIncome: primary.totalIncome,
+    totalExpense: primary.totalExpense,
+    balance: primary.balance,
+    savingRate: primary.savingRate,
+    healthScore: primary.healthScore,
+    expenseChangePct: primary.expenseChangePct,
+    topCategories: primary.topCategories,
+    byCurrency,
   };
 }
 
@@ -326,12 +427,14 @@ export async function analyzeBudget(userId: string, month?: number, year?: numbe
 
   const from = new Date(y, m - 1, 1);
   const to = endOfMonth(from);
+  const { currency, where: walletFilter } = await primaryCurrencyWalletFilter(userId);
 
   const results = await Promise.all(
     budgets.map(async (b) => {
       const spentAgg = await prisma.transaction.aggregate({
         where: {
           userId,
+          ...walletFilter,
           type: "EXPENSE",
           categoryId: b.categoryId,
           transactionDate: { gte: from, lte: to },
@@ -355,7 +458,7 @@ export async function analyzeBudget(userId: string, month?: number, year?: numbe
     }),
   );
 
-  return { month: m, year: y, budgets: results };
+  return { month: m, year: y, currency, budgets: results };
 }
 
 export async function upsertBudget(userId: string, raw: unknown) {
@@ -496,13 +599,14 @@ export async function getCashflowSeries(userId: string, months = 6) {
   assertUser(userId);
   const series: Array<{ label: string; income: number; expense: number }> = [];
   const now = new Date();
+  const { currency, where: walletFilter } = await primaryCurrencyWalletFilter(userId);
 
   for (let i = months - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const from = startOfMonth(d);
     const to = endOfMonth(d);
     const txs = await prisma.transaction.findMany({
-      where: { userId, transactionDate: { gte: from, lte: to } },
+      where: { userId, ...walletFilter, transactionDate: { gte: from, lte: to } },
     });
     let income = 0;
     let expense = 0;
@@ -518,7 +622,7 @@ export async function getCashflowSeries(userId: string, months = 6) {
     });
   }
 
-  return series;
+  return { currency, series };
 }
 
 export async function predictMonthEnd(userId: string) {
@@ -543,8 +647,64 @@ export async function predictMonthEnd(userId: string) {
   };
 }
 
+export async function createWallet(userId: string, raw: CreateWalletInput) {
+  assertUser(userId);
+  const input = createWalletSchema.parse(raw);
+
+  if (input.isDefault) {
+    await prisma.wallet.updateMany({ where: { userId, isDefault: true }, data: { isDefault: false } });
+  }
+
+  return prisma.wallet.create({
+    data: { userId, name: input.name, currency: input.currency, color: input.color ?? null, isDefault: input.isDefault ?? false },
+  });
+}
+
+export async function listWallets(userId: string) {
+  assertUser(userId);
+  const wallets = await prisma.wallet.findMany({
+    where: { userId, isActive: true },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+  });
+
+  return Promise.all(
+    wallets.map(async (w) => {
+      const agg = await prisma.transaction.groupBy({
+        by: ["type"],
+        where: { userId, walletId: w.id },
+        _sum: { amount: true },
+      });
+      const income = toNumber(agg.find((r) => r.type === "INCOME")?._sum.amount ?? 0);
+      const expense = toNumber(agg.find((r) => r.type === "EXPENSE")?._sum.amount ?? 0);
+      return { id: w.id, name: w.name, currency: w.currency, color: w.color, isDefault: w.isDefault, isActive: w.isActive, balance: income - expense, createdAt: w.createdAt };
+    }),
+  );
+}
+
+export async function updateWallet(userId: string, raw: UpdateWalletInput) {
+  assertUser(userId);
+  const input = updateWalletSchema.parse(raw);
+  const existing = await prisma.wallet.findFirst({ where: { id: input.id, userId } });
+  if (!existing) throw new FinanceEngineError("Wallet not found", "WALLET_NOT_FOUND", 404);
+
+  if (input.isDefault) {
+    await prisma.wallet.updateMany({ where: { userId, isDefault: true }, data: { isDefault: false } });
+  }
+
+  const { id, ...data } = input;
+  return prisma.wallet.update({ where: { id }, data });
+}
+
+export async function deleteWallet(userId: string, id: string) {
+  assertUser(userId);
+  const existing = await prisma.wallet.findFirst({ where: { id, userId } });
+  if (!existing) throw new FinanceEngineError("Wallet not found", "WALLET_NOT_FOUND", 404);
+  await prisma.wallet.update({ where: { id }, data: { isActive: false } });
+  return { id };
+}
+
 function serializeTransaction(
-  tx: Prisma.TransactionGetPayload<{ include: { category: true } }>,
+  tx: Prisma.TransactionGetPayload<{ include: { category: true; wallet: true } }>,
 ) {
   return {
     id: tx.id,
@@ -553,6 +713,10 @@ function serializeTransaction(
     categoryId: tx.categoryId,
     category: tx.category
       ? { id: tx.category.id, name: tx.category.name, color: tx.category.color, icon: tx.category.icon }
+      : null,
+    walletId: tx.walletId,
+    wallet: tx.wallet
+      ? { id: tx.wallet.id, name: tx.wallet.name, currency: tx.wallet.currency, color: tx.wallet.color }
       : null,
     subCategory: tx.subCategory,
     description: tx.description,
@@ -584,4 +748,8 @@ export const FinanceEngine = {
   listAiInsights,
   getCashflowSeries,
   predictMonthEnd,
+  createWallet,
+  listWallets,
+  updateWallet,
+  deleteWallet,
 };
