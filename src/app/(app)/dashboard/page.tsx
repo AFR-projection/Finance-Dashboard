@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowDownLeft,
   ArrowRight,
   ArrowUpRight,
   Bot,
+  ChevronLeft,
+  ChevronRight,
   Eye,
   EyeOff,
   Plus,
@@ -83,6 +85,8 @@ export default function OverviewPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [privateMode, setPrivateMode] = useState(false);
+  const [activeCurrencyIndex, setActiveCurrencyIndex] = useState(0);
+  const currencyCarouselRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch("/api/dashboard")
@@ -113,6 +117,61 @@ export default function OverviewPage() {
   const money = (value: number, currency = primary?.currency ?? "IDR") =>
     privateMode ? "••••••••" : formatCurrency(value, currency);
   const monthName = new Date().toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+  const currencyCodes = Array.from(
+    new Set([
+      ...data.overview.byCurrency.map((item) => item.currency),
+      ...data.wallets.map((wallet) => wallet.currency),
+    ]),
+  );
+  const currencies = (currencyCodes.length > 0 ? currencyCodes : [data.overview.currency]).map(
+    (currencyCode) => {
+      const cashflow = data.overview.byCurrency.find(
+        (item) => item.currency === currencyCode,
+      );
+      return {
+        currency: currencyCode,
+        totalIncome: cashflow?.totalIncome ?? 0,
+        totalExpense: cashflow?.totalExpense ?? 0,
+        balance: cashflow?.balance ?? 0,
+        savingRate: cashflow?.savingRate ?? 0,
+        totalAssets: data.wallets
+          .filter((wallet) => wallet.currency === currencyCode)
+          .reduce((total, wallet) => total + wallet.balance, 0),
+      };
+    },
+  );
+
+  function goToCurrency(index: number) {
+    const targetIndex = Math.max(0, Math.min(index, currencies.length - 1));
+    const container = currencyCarouselRef.current;
+    const card = container?.children.item(targetIndex) as HTMLElement | null;
+    if (!container || !card) return;
+    const firstCard = container.children.item(0) as HTMLElement | null;
+    container.scrollTo({
+      left: card.offsetLeft - (firstCard?.offsetLeft ?? 0),
+      behavior: "smooth",
+    });
+    setActiveCurrencyIndex(targetIndex);
+  }
+
+  function syncActiveCurrency() {
+    const container = currencyCarouselRef.current;
+    if (!container) return;
+    const center = container.scrollLeft + container.clientWidth / 2;
+    const firstCard = container.children.item(0) as HTMLElement | null;
+    const baseOffset = firstCard?.offsetLeft ?? 0;
+    let closestIndex = 0;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    Array.from(container.children).forEach((child, index) => {
+      const card = child as HTMLElement;
+      const distance = Math.abs(card.offsetLeft - baseOffset + card.offsetWidth / 2 - center);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestIndex = index;
+      }
+    });
+    setActiveCurrencyIndex(closestIndex);
+  }
 
   return (
     <div className="space-y-5 pt-1 lg:space-y-7 lg:pt-8">
@@ -136,43 +195,137 @@ export default function OverviewPage() {
         </Button>
       </section>
 
-      <section className="relative overflow-hidden rounded-[1.8rem] bg-[linear-gradient(135deg,oklch(0.27_0.07_174),oklch(0.38_0.1_190))] p-5 text-white shadow-[0_30px_70px_-40px_oklch(0.2_0.08_175)] sm:p-7">
-        <div className="absolute -right-16 -top-20 size-64 rounded-full border border-white/10 bg-white/[0.035]" />
-        <div className="absolute -bottom-24 right-20 size-48 rounded-full border border-white/10" />
-        <div className="relative">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/55">
-                Arus kas bersih · {primary?.currency}
-              </p>
-              <p className="tabular-money mt-2 text-[2rem] font-semibold leading-none sm:text-4xl">
-                {money(primary?.balance ?? 0)}
-              </p>
-            </div>
-            <span className="grid size-10 place-items-center rounded-2xl border border-white/10 bg-white/10 backdrop-blur">
-              <ShieldCheck className="size-5 text-emerald-200" />
-            </span>
-          </div>
+      <section aria-label="Arus kas per mata uang" className="relative">
+        <div
+          ref={currencyCarouselRef}
+          role="region"
+          aria-roledescription="carousel"
+          aria-label="Geser untuk melihat arus kas setiap mata uang"
+          tabIndex={0}
+          onScroll={syncActiveCurrency}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft") goToCurrency(activeCurrencyIndex - 1);
+            if (event.key === "ArrowRight") goToCurrency(activeCurrencyIndex + 1);
+          }}
+          className="hide-scrollbar -mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 outline-none sm:mx-0 sm:px-0"
+        >
+          {currencies.map((currency, index) => {
+            const walletCount = data.wallets.filter(
+              (wallet) => wallet.currency === currency.currency,
+            ).length;
+            const themes = [
+              "from-[oklch(0.27_0.07_174)] to-[oklch(0.38_0.1_190)]",
+              "from-[oklch(0.27_0.08_245)] to-[oklch(0.42_0.11_265)]",
+              "from-[oklch(0.31_0.08_55)] to-[oklch(0.48_0.12_75)]",
+              "from-[oklch(0.27_0.08_305)] to-[oklch(0.43_0.11_325)]",
+            ];
+            return (
+              <article
+                key={currency.currency}
+                aria-label={`${currency.currency}, kartu ${index + 1} dari ${currencies.length}`}
+                className={`relative min-w-[calc(100%-1rem)] snap-center overflow-hidden rounded-[1.8rem] bg-gradient-to-br ${themes[index % themes.length]} p-5 text-white shadow-[0_30px_70px_-40px_oklch(0.2_0.08_175)] sm:min-w-full sm:p-7`}
+              >
+                <div className="pointer-events-none absolute -right-16 -top-20 size-64 rounded-full border border-white/10 bg-white/[0.035]" />
+                <div className="pointer-events-none absolute -bottom-24 right-20 size-48 rounded-full border border-white/10" />
+                <div className="relative">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/55">
+                          Arus kas bersih · {currency.currency}
+                        </p>
+                        {currency.currency === data.overview.currency && (
+                          <span className="rounded-md bg-white/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-white/65">
+                            Utama
+                          </span>
+                        )}
+                      </div>
+                      <p className="tabular-money mt-2 text-[2rem] font-semibold leading-none sm:text-4xl">
+                        {money(currency.balance, currency.currency)}
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] font-medium text-white/50">
+                        <span>{walletCount} rekening</span>
+                        <span className="size-1 rounded-full bg-white/25" />
+                        <span>Total aset {money(currency.totalAssets, currency.currency)}</span>
+                        <span className="size-1 rounded-full bg-white/25" />
+                        <span>Saving rate {currency.savingRate}%</span>
+                      </div>
+                    </div>
+                    <span className="grid size-10 shrink-0 place-items-center rounded-2xl border border-white/10 bg-white/10 backdrop-blur">
+                      <ShieldCheck className="size-5 text-emerald-200" />
+                    </span>
+                  </div>
 
-          <div className="mt-7 grid grid-cols-2 gap-3 sm:max-w-lg">
-            <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 backdrop-blur">
-              <div className="flex items-center gap-2 text-[10px] text-white/55">
-                <ArrowDownLeft className="size-3.5 text-emerald-300" /> Pemasukan
-              </div>
-              <p className="tabular-money mt-1.5 text-sm font-semibold sm:text-base">
-                {money(primary?.totalIncome ?? 0)}
-              </p>
+                  <div className="mt-7 grid grid-cols-2 gap-3 sm:max-w-lg">
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 backdrop-blur">
+                      <div className="flex items-center gap-2 text-[10px] text-white/55">
+                        <ArrowDownLeft className="size-3.5 text-emerald-300" /> Pemasukan
+                      </div>
+                      <p className="tabular-money mt-1.5 truncate text-sm font-semibold sm:text-base">
+                        {money(currency.totalIncome, currency.currency)}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 backdrop-blur">
+                      <div className="flex items-center gap-2 text-[10px] text-white/55">
+                        <ArrowUpRight className="size-3.5 text-amber-300" /> Pengeluaran
+                      </div>
+                      <p className="tabular-money mt-1.5 truncate text-sm font-semibold sm:text-base">
+                        {money(currency.totalExpense, currency.currency)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+
+        {currencies.length > 1 && (
+          <div className="mt-3 flex items-center justify-between px-1">
+            <div
+              className="flex items-center gap-1.5"
+              aria-label={`Mata uang ${activeCurrencyIndex + 1} dari ${currencies.length}`}
+            >
+              {currencies.map((currency, index) => (
+                <button
+                  key={currency.currency}
+                  type="button"
+                  onClick={() => goToCurrency(index)}
+                  aria-label={`Tampilkan ${currency.currency}`}
+                  aria-current={index === activeCurrencyIndex ? "true" : undefined}
+                  className={`h-1.5 rounded-full transition-all ${index === activeCurrencyIndex ? "w-6 bg-primary" : "w-1.5 bg-border"}`}
+                />
+              ))}
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 backdrop-blur">
-              <div className="flex items-center gap-2 text-[10px] text-white/55">
-                <ArrowUpRight className="size-3.5 text-amber-300" /> Pengeluaran
-              </div>
-              <p className="tabular-money mt-1.5 text-sm font-semibold sm:text-base">
-                {money(primary?.totalExpense ?? 0)}
-              </p>
+            <div className="hidden items-center gap-1 sm:flex">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                className="rounded-xl"
+                disabled={activeCurrencyIndex === 0}
+                onClick={() => goToCurrency(activeCurrencyIndex - 1)}
+                aria-label="Mata uang sebelumnya"
+              >
+                <ChevronLeft className="size-3.5" />
+              </Button>
+              <span className="min-w-14 text-center text-[10px] font-bold text-muted-foreground">
+                {currencies[activeCurrencyIndex]?.currency}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                className="rounded-xl"
+                disabled={activeCurrencyIndex === currencies.length - 1}
+                onClick={() => goToCurrency(activeCurrencyIndex + 1)}
+                aria-label="Mata uang berikutnya"
+              >
+                <ChevronRight className="size-3.5" />
+              </Button>
             </div>
           </div>
-        </div>
+        )}
       </section>
 
       <section className="grid grid-cols-4 gap-2 sm:gap-3">
