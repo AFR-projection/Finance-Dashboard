@@ -82,6 +82,76 @@ describe("runFinanceAgent transport guards", () => {
     expect(reply.text).toBe(UNGROUNDED_FIGURE_TEXT);
   });
 
+  it("delivers a grounded balance answer that uses the phrase 'tercatat'", async () => {
+    // A read-only turn. The prompt instructs the model to qualify figures with
+    // "berdasarkan data yang tercatat", which must not trip the write guard.
+    queueModelReplies(
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "call-1", type: "function", function: { name: "getFinancialSnapshot", arguments: "{}" } },
+        ],
+      },
+      {
+        role: "assistant",
+        content:
+          "Saldo Mandiri Rp2.500.000. Total aset Rp3.100.000 berdasarkan data yang tercatat.",
+      },
+    );
+    mocks.executeToolsParallel.mockResolvedValue([
+      {
+        name: "getFinancialSnapshot",
+        result: {
+          wallets: [
+            { name: "Mandiri", currency: "IDR", balance: 2500000 },
+            { name: "Cash", currency: "IDR", balance: 600000 },
+          ],
+          netCashflow: 400000,
+        },
+      },
+    ]);
+
+    const reply = await runFinanceAgent({
+      userId: "user-1",
+      message: "tolong check berapa saldo di bank mandiri gua dan total kan seluruh aset saya",
+      config: CONFIG,
+      channel: "TELEGRAM",
+    });
+
+    expect(reply.text).toContain("Rp2.500.000");
+    expect(reply.text).not.toBe(UNVERIFIED_WRITE_CLAIM_TEXT);
+  });
+
+  it("answers a bare saldo question instead of returning a write error", async () => {
+    queueModelReplies(
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "call-1", type: "function", function: { name: "getFinancialSnapshot", arguments: "{}" } },
+        ],
+      },
+      { role: "assistant", content: "Total saldo Anda Rp1.200.000 di 1 rekening." },
+    );
+    mocks.executeToolsParallel.mockResolvedValue([
+      {
+        name: "getFinancialSnapshot",
+        result: { wallets: [{ name: "BCA", currency: "IDR", balance: 1200000 }], netCashflow: 0 },
+      },
+    ]);
+
+    const reply = await runFinanceAgent({
+      userId: "user-1",
+      message: "berapa saldo gua ?",
+      config: CONFIG,
+      channel: "TELEGRAM",
+    });
+
+    expect(reply.text).toContain("Rp1.200.000");
+    expect(mocks.executeToolsParallel).toHaveBeenCalled();
+  });
+
   it("surfaces the account prompt instead of writing when several wallets match", async () => {
     queueModelReplies({
       role: "assistant",

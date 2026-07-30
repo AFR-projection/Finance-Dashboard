@@ -40,8 +40,22 @@ export function classifyDeterministicIntent(message: string): DeterministicAgent
   return null;
 }
 
+const SAVE_WORD_PATTERN = /\b(?:tercatat|dicatat|tersimpan|disimpan)\b/gi;
+
+/**
+ * Wording that makes a nearby "tercatat" describe records that already exist,
+ * or a write that explicitly did not happen. The system prompt itself tells the
+ * model to qualify figures with "berdasarkan data yang tercatat", so a bare
+ * keyword match would flag correct read answers as false save claims.
+ */
+const NOT_A_SAVE_PATTERN =
+  /\b(?:belum|tidak|tak|gagal|bukan|batal|dibatalkan|jangan|tanpa|yang|berdasarkan)\b(?:\s+\w+){0,2}\s*$/i;
+
 export function claimsTransactionWasSaved(text: string): boolean {
-  return /\b(?:(?:sudah|telah|berhasil)\s+)?(?:tercatat|dicatat|tersimpan|disimpan)\b/i.test(text);
+  for (const match of text.matchAll(SAVE_WORD_PATTERN)) {
+    if (!NOT_A_SAVE_PATTERN.test(text.slice(0, match.index))) return true;
+  }
+  return false;
 }
 
 export function requiredToolForIntent(intent: DeterministicAgentIntent):
@@ -63,9 +77,16 @@ export const UNGROUNDED_FIGURE_TEXT =
  * The model's prose is never evidence of a write. A reply may only claim a
  * transaction was saved when a tool returned a read-after-write receipt during
  * the same turn; otherwise the claim is replaced instead of trusted.
+ *
+ * Scoped to turns that actually attempted a write. A read-only turn cannot
+ * fabricate a save, so applying it there only destroys correct answers.
  */
-export function enforceWriteClaim(params: { text: string; hasVerifiedWrite: boolean }): string {
-  if (params.hasVerifiedWrite) return params.text;
+export function enforceWriteClaim(params: {
+  text: string;
+  hasVerifiedWrite: boolean;
+  writeIntended: boolean;
+}): string {
+  if (params.hasVerifiedWrite || !params.writeIntended) return params.text;
   if (!claimsTransactionWasSaved(params.text)) return params.text;
   return UNVERIFIED_WRITE_CLAIM_TEXT;
 }

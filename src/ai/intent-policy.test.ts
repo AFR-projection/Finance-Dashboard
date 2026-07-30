@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   UNGROUNDED_FIGURE_TEXT,
   UNVERIFIED_WRITE_CLAIM_TEXT,
+  claimsTransactionWasSaved,
   classifyDeterministicIntent,
   enforceGroundedFigures,
   enforceWriteClaim,
@@ -34,18 +35,50 @@ describe("classifyDeterministicIntent", () => {
 describe("enforceWriteClaim", () => {
   it("replaces a saved-claim that no tool receipt backs", () => {
     expect(
-      enforceWriteClaim({ text: "Pengeluaran sudah tercatat ✅", hasVerifiedWrite: false }),
+      enforceWriteClaim({
+        text: "Pengeluaran sudah tercatat ✅",
+        hasVerifiedWrite: false,
+        writeIntended: true,
+      }),
     ).toBe(UNVERIFIED_WRITE_CLAIM_TEXT);
   });
 
   it("keeps the reply when a verified write happened", () => {
     const text = "Pengeluaran sudah tercatat di BCA";
-    expect(enforceWriteClaim({ text, hasVerifiedWrite: true })).toBe(text);
+    expect(enforceWriteClaim({ text, hasVerifiedWrite: true, writeIntended: true })).toBe(text);
   });
 
   it("leaves replies that never claimed a write", () => {
     const text = "Pengeluaran terbesar Anda ada di kategori Makanan.";
-    expect(enforceWriteClaim({ text, hasVerifiedWrite: false })).toBe(text);
+    expect(enforceWriteClaim({ text, hasVerifiedWrite: false, writeIntended: true })).toBe(text);
+  });
+
+  it("leaves a balance answer that only describes existing records", () => {
+    // The system prompt tells the model to write exactly this phrase, so the
+    // write guard must not read it as a claim that something was just saved.
+    const text = "Saldo Mandiri Rp2.500.000 berdasarkan data yang tercatat.";
+    expect(enforceWriteClaim({ text, hasVerifiedWrite: false, writeIntended: false })).toBe(text);
+  });
+
+  it("does not treat descriptive or negated record wording as a save claim", () => {
+    expect(claimsTransactionWasSaved("berdasarkan data yang tercatat")).toBe(false);
+    expect(claimsTransactionWasSaved("Ada 12 transaksi yang tercatat bulan ini.")).toBe(false);
+    expect(claimsTransactionWasSaved("Transaksi belum tercatat.")).toBe(false);
+    expect(claimsTransactionWasSaved("Transaksi gagal disimpan.")).toBe(false);
+  });
+
+  it("still detects a real save claim", () => {
+    expect(claimsTransactionWasSaved("Pengeluaran sudah tercatat")).toBe(true);
+    expect(claimsTransactionWasSaved("Transaksi berhasil disimpan")).toBe(true);
+    expect(claimsTransactionWasSaved("Data sudah tercatat di BCA")).toBe(true);
+  });
+
+  it("flags a save claim that follows a descriptive clause in the same reply", () => {
+    // The first "tercatat" is descriptive; the second is a real claim and the
+    // scan must not stop at the first excused match.
+    expect(
+      claimsTransactionWasSaved("Berdasarkan data yang tercatat, pengeluaran sudah tersimpan."),
+    ).toBe(true);
   });
 });
 

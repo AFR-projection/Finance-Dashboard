@@ -191,7 +191,11 @@ async function runOpenRouter(params: {
   // filtered against what the tools actually returned this turn.
   const guard = (text: string): string =>
     enforceGroundedFigures({
-      text: enforceWriteClaim({ text, hasVerifiedWrite: verifiedWrite }),
+      text: enforceWriteClaim({
+        text,
+        hasVerifiedWrite: verifiedWrite,
+        writeIntended: writeAttempted || intent === "CREATE_TRANSACTION",
+      }),
       intent,
       ranRequiredRead: toolsUsed.some((name) => GROUNDING_READ_TOOLS.has(name)),
     });
