@@ -126,4 +126,230 @@
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.025em;
   }
+
+  .scene-3d {
+    perspective: 1400px;
+    perspective-origin: 50% 40%;
+  }
+  .preserve-3d {
+    transform-style: preserve-3d;
+  }
+  .depth-1 {
+    transform: translateZ(18px);
+  }
+  .depth-2 {
+    transform: translateZ(38px);
+  }
+  .depth-3 {
+    transform: translateZ(64px);
+  }
+
+  .aurora-field {
+    position: absolute;
+    inset: -20%;
+    filter: blur(64px);
+    opacity: 0.75;
+    pointer-events: none;
+  }
+  .aurora-blob {
+    position: absolute;
+    border-radius: 50%;
+    mix-blend-mode: plus-lighter;
+    animation: aurora-drift var(--blob-dur, 22s) ease-in-out infinite;
+    animation-delay: var(--blob-delay, 0s);
+  }
+
+  .grid-floor {
+    position: absolute;
+    inset-inline: -50%;
+    bottom: -30%;
+    height: 90%;
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right, oklch(0.72 0.09 175 / 0.16) 1px, transparent 1px),
+      linear-gradient(to bottom, oklch(0.72 0.09 175 / 0.16) 1px, transparent 1px);
+    background-size: 56px 56px;
+    transform: rotateX(72deg);
+    transform-origin: 50% 100%;
+    mask-image: linear-gradient(to top, black, transparent 72%);
+    animation: grid-scroll 9s linear infinite;
+  }
+
+  .sheen {
+    position: relative;
+    overflow: hidden;
+  }
+  .sheen::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      110deg,
+      transparent 30%,
+      rgb(255 255 255 / 0.22) 48%,
+      transparent 66%
+    );
+    transform: translateX(-120%);
+    animation: sheen-sweep 5.5s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  .glow-ring {
+    animation: glow-pulse 2.6s ease-in-out infinite;
+  }
+
+  .float-y {
+    animation: float-y 7s ease-in-out infinite;
+  }
+
+  .vault-shell {
+    background:
+      radial-gradient(ellipse 120% 80% at 50% -20%, oklch(0.35 0.09 175 / 0.5), transparent 60%),
+      radial-gradient(ellipse 90% 60% at 85% 110%, oklch(0.42 0.1 92 / 0.28), transparent 62%),
+      linear-gradient(165deg, oklch(0.16 0.03 190), oklch(0.11 0.02 200) 55%, oklch(0.14 0.03 175));
+  }
+
+  .vault-noise::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.35;
+    background-image: radial-gradient(oklch(1 0 0 / 0.5) 0.6px, transparent 0.6px);
+    background-size: 4px 4px;
+    mix-blend-mode: overlay;
+  }
+
+  .ring-orbit {
+    animation: ring-spin var(--orbit-dur, 26s) linear infinite;
+  }
+  .ring-orbit-reverse {
+    animation: ring-spin var(--orbit-dur, 34s) linear infinite reverse;
+  }
+
+  .scan-sweep::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    height: 32%;
+    top: -32%;
+    pointer-events: none;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      oklch(0.85 0.13 175 / 0.28),
+      transparent
+    );
+    animation: scan-drop 3.4s ease-in-out infinite;
+  }
+
+  .breathe {
+    animation: breathe 4.5s ease-in-out infinite;
+  }
+}
+
+@keyframes ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes scan-drop {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(420%);
+    opacity: 0;
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes aurora-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(6%, -8%, 0) scale(1.14);
+  }
+  66% {
+    transform: translate3d(-7%, 5%, 0) scale(0.92);
+  }
+}
+
+@keyframes grid-scroll {
+  to {
+    background-position: 0 56px;
+  }
+}
+
+@keyframes sheen-sweep {
+  0%,
+  62% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes glow-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes float-y {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora-blob,
+  .grid-floor,
+  .sheen::after,
+  .glow-ring,
+  .float-y,
+  .ring-orbit,
+  .ring-orbit-reverse,
+  .scan-sweep::after,
+  .breathe {
+    animation: none !important;
+  }
+  .grid-floor {
+    opacity: 0.35;
+  }
+  .scan-sweep::after {
+    display: none;
+  }
 }

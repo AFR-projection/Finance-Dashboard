@@ -34,6 +34,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AuroraScene } from "@/components/motion/aurora-scene";
+import { TiltCard } from "@/components/motion/tilt-card";
+import { CountUp } from "@/components/motion/count-up";
+
+const reveal = {
+  hidden: { opacity: 0, y: 22, filter: "blur(6px)" },
+  show: { opacity: 1, y: 0, filter: "blur(0px)" },
+};
+
+const revealTransition = { duration: 0.55, ease: [0.22, 1, 0.36, 1] as const };
 
 type DashboardData = {
   overview: {
@@ -174,8 +184,19 @@ export default function OverviewPage() {
   }
 
   return (
-    <div className="space-y-5 pt-1 lg:space-y-7 lg:pt-8">
-      <section className="flex items-end justify-between gap-4">
+    <>
+      <AuroraScene withGrid={false} />
+      <motion.div
+        initial="hidden"
+        animate="show"
+        variants={{ show: { transition: { staggerChildren: 0.07 } } }}
+        className="space-y-5 pt-1 lg:space-y-7 lg:pt-8"
+      >
+      <motion.section
+        variants={reveal}
+        transition={revealTransition}
+        className="flex items-end justify-between gap-4"
+      >
         <div>
           <p className="app-eyebrow mb-1">Ringkasan {monthName}</p>
           <h1 className="app-page-title">Selamat datang kembali</h1>
@@ -187,15 +208,20 @@ export default function OverviewPage() {
           type="button"
           variant="outline"
           size="icon-lg"
-          className="app-surface rounded-xl"
+          className="app-surface rounded-xl transition-transform duration-200 hover:-translate-y-0.5 active:scale-95"
           onClick={() => setPrivateMode((value) => !value)}
           aria-label={privateMode ? "Tampilkan nominal" : "Sembunyikan nominal"}
         >
           {privateMode ? <EyeOff /> : <Eye />}
         </Button>
-      </section>
+      </motion.section>
 
-      <section aria-label="Arus kas per mata uang" className="relative">
+      <motion.section
+        variants={reveal}
+        transition={revealTransition}
+        aria-label="Arus kas per mata uang"
+        className="relative"
+      >
         <div
           ref={currencyCarouselRef}
           role="region"
@@ -220,62 +246,80 @@ export default function OverviewPage() {
               "from-[oklch(0.27_0.08_305)] to-[oklch(0.43_0.11_325)]",
             ];
             return (
-              <article
+              <TiltCard
                 key={currency.currency}
-                aria-label={`${currency.currency}, kartu ${index + 1} dari ${currencies.length}`}
-                className={`relative min-w-[calc(100%-1rem)] snap-center overflow-hidden rounded-[1.8rem] bg-gradient-to-br ${themes[index % themes.length]} p-5 text-white shadow-[0_30px_70px_-40px_oklch(0.2_0.08_175)] sm:min-w-full sm:p-7`}
+                intensity={7}
+                className="min-w-[calc(100%-1rem)] shrink-0 snap-center rounded-[1.8rem] sm:min-w-full"
               >
-                <div className="pointer-events-none absolute -right-16 -top-20 size-64 rounded-full border border-white/10 bg-white/[0.035]" />
-                <div className="pointer-events-none absolute -bottom-24 right-20 size-48 rounded-full border border-white/10" />
-                <div className="relative">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/55">
-                          Arus kas bersih · {currency.currency}
+                <article
+                  aria-label={`${currency.currency}, kartu ${index + 1} dari ${currencies.length}`}
+                  className={`preserve-3d relative rounded-[1.8rem] bg-gradient-to-br ${themes[index % themes.length]} p-5 text-white shadow-[0_40px_80px_-42px_oklch(0.2_0.08_175)] sm:p-7`}
+                >
+                  <div
+                    aria-hidden
+                    className="sheen pointer-events-none absolute inset-0 overflow-hidden rounded-[1.8rem]"
+                  >
+                    <div className="absolute -right-16 -top-20 size-64 rounded-full border border-white/10 bg-white/[0.035]" />
+                    <div className="absolute -bottom-24 right-20 size-48 rounded-full border border-white/10" />
+                    <div className="absolute -right-10 top-1/3 size-40 rounded-full bg-white/10 blur-3xl" />
+                  </div>
+                  <div className="preserve-3d relative depth-1">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/55">
+                            Arus kas bersih · {currency.currency}
+                          </p>
+                          {currency.currency === data.overview.currency && (
+                            <span className="rounded-md bg-white/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-white/65">
+                              Utama
+                            </span>
+                          )}
+                        </div>
+                        <p className="tabular-money mt-2 text-[2rem] font-semibold leading-none depth-2 sm:text-4xl">
+                          {privateMode ? (
+                            "••••••••"
+                          ) : (
+                            <CountUp
+                              value={currency.balance}
+                              format={(value) => formatCurrency(value, currency.currency)}
+                            />
+                          )}
                         </p>
-                        {currency.currency === data.overview.currency && (
-                          <span className="rounded-md bg-white/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-white/65">
-                            Utama
-                          </span>
-                        )}
+                        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] font-medium text-white/50">
+                          <span>{walletCount} rekening</span>
+                          <span className="size-1 rounded-full bg-white/25" />
+                          <span>Total aset {money(currency.totalAssets, currency.currency)}</span>
+                          <span className="size-1 rounded-full bg-white/25" />
+                          <span>Saving rate {currency.savingRate}%</span>
+                        </div>
                       </div>
-                      <p className="tabular-money mt-2 text-[2rem] font-semibold leading-none sm:text-4xl">
-                        {money(currency.balance, currency.currency)}
-                      </p>
-                      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] font-medium text-white/50">
-                        <span>{walletCount} rekening</span>
-                        <span className="size-1 rounded-full bg-white/25" />
-                        <span>Total aset {money(currency.totalAssets, currency.currency)}</span>
-                        <span className="size-1 rounded-full bg-white/25" />
-                        <span>Saving rate {currency.savingRate}%</span>
-                      </div>
+                      <span className="grid size-10 shrink-0 place-items-center rounded-2xl border border-white/10 bg-white/10 backdrop-blur depth-3">
+                        <ShieldCheck className="size-5 text-emerald-200" />
+                      </span>
                     </div>
-                    <span className="grid size-10 shrink-0 place-items-center rounded-2xl border border-white/10 bg-white/10 backdrop-blur">
-                      <ShieldCheck className="size-5 text-emerald-200" />
-                    </span>
-                  </div>
 
-                  <div className="mt-7 grid grid-cols-2 gap-3 sm:max-w-lg">
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 backdrop-blur">
-                      <div className="flex items-center gap-2 text-[10px] text-white/55">
-                        <ArrowDownLeft className="size-3.5 text-emerald-300" /> Pemasukan
+                    <div className="preserve-3d mt-7 grid grid-cols-2 gap-3 depth-2 sm:max-w-lg">
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 backdrop-blur">
+                        <div className="flex items-center gap-2 text-[10px] text-white/55">
+                          <ArrowDownLeft className="size-3.5 text-emerald-300" /> Pemasukan
+                        </div>
+                        <p className="tabular-money mt-1.5 truncate text-sm font-semibold sm:text-base">
+                          {money(currency.totalIncome, currency.currency)}
+                        </p>
                       </div>
-                      <p className="tabular-money mt-1.5 truncate text-sm font-semibold sm:text-base">
-                        {money(currency.totalIncome, currency.currency)}
-                      </p>
-                    </div>
-                    <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 backdrop-blur">
-                      <div className="flex items-center gap-2 text-[10px] text-white/55">
-                        <ArrowUpRight className="size-3.5 text-amber-300" /> Pengeluaran
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 backdrop-blur">
+                        <div className="flex items-center gap-2 text-[10px] text-white/55">
+                          <ArrowUpRight className="size-3.5 text-amber-300" /> Pengeluaran
+                        </div>
+                        <p className="tabular-money mt-1.5 truncate text-sm font-semibold sm:text-base">
+                          {money(currency.totalExpense, currency.currency)}
+                        </p>
                       </div>
-                      <p className="tabular-money mt-1.5 truncate text-sm font-semibold sm:text-base">
-                        {money(currency.totalExpense, currency.currency)}
-                      </p>
                     </div>
                   </div>
-                </div>
-              </article>
+                </article>
+              </TiltCard>
             );
           })}
         </div>
@@ -326,16 +370,29 @@ export default function OverviewPage() {
             </div>
           </div>
         )}
-      </section>
+      </motion.section>
 
-      <section className="grid grid-cols-4 gap-2 sm:gap-3">
+      <motion.section
+        variants={reveal}
+        transition={revealTransition}
+        className="scene-3d grid grid-cols-4 gap-2 sm:gap-3"
+      >
         {quickActions.map((item, index) => {
           const Icon = item.icon;
           return (
-            <motion.div key={item.href} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.04 }}>
+            <motion.div
+              key={item.href}
+              initial={{ opacity: 0, y: 14, rotateX: -18 }}
+              animate={{ opacity: 1, y: 0, rotateX: 0 }}
+              transition={{ delay: 0.25 + index * 0.06, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+              whileHover={{ y: -5, rotateX: 6, scale: 1.03 }}
+              whileTap={{ scale: 0.96 }}
+              className="preserve-3d"
+              style={{ transformPerspective: 800 }}
+            >
               <Link
                 href={item.href}
-                className="app-surface flex min-h-20 flex-col items-center justify-center gap-2 rounded-2xl px-1 text-center text-[10px] font-semibold transition-transform active:scale-95 sm:min-h-24 sm:text-xs"
+                className="app-surface flex min-h-20 flex-col items-center justify-center gap-2 rounded-2xl px-1 text-center text-[10px] font-semibold sm:min-h-24 sm:text-xs"
               >
                 <span className="grid size-8 place-items-center rounded-xl bg-primary/8 text-primary sm:size-9">
                   <Icon className="size-4" strokeWidth={1.8} />
@@ -345,10 +402,14 @@ export default function OverviewPage() {
             </motion.div>
           );
         })}
-      </section>
+      </motion.section>
 
-      <div className="grid gap-4 xl:grid-cols-[1.65fr_1fr]">
-        <Card className="app-surface rounded-[1.5rem] ring-0">
+      <motion.div
+        variants={reveal}
+        transition={revealTransition}
+        className="grid gap-4 xl:grid-cols-[1.65fr_1fr]"
+      >
+        <Card className="app-surface sheen rounded-[1.5rem] ring-0 transition-shadow duration-300 hover:shadow-[0_28px_60px_-38px_oklch(0.25_0.08_175/.6)]">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <p className="app-eyebrow">Tren 6 bulan</p>
@@ -372,50 +433,65 @@ export default function OverviewPage() {
                 <CartesianGrid vertical={false} strokeDasharray="4 6" stroke="rgba(80,105,95,.12)" />
                 <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#78847f" }} />
                 <Tooltip formatter={(value) => formatCurrency(Number(value), data.cashflow.currency)} contentStyle={{ borderRadius: 14, border: "1px solid rgba(0,0,0,.06)", fontSize: 11 }} />
-                <Area type="monotone" dataKey="income" stroke="#0f766e" strokeWidth={2.2} fill="url(#incomeFill)" />
-                <Area type="monotone" dataKey="expense" stroke="#d97706" strokeWidth={2.2} fill="url(#expenseFill)" />
+                <Area type="monotone" dataKey="income" stroke="#0f766e" strokeWidth={2.2} fill="url(#incomeFill)" animationDuration={1100} animationEasing="ease-out" />
+                <Area type="monotone" dataKey="expense" stroke="#d97706" strokeWidth={2.2} fill="url(#expenseFill)" animationDuration={1100} animationBegin={150} animationEasing="ease-out" />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        <Card className="app-surface rounded-[1.5rem] ring-0">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <p className="app-eyebrow">AI forecast</p>
-              <CardTitle className="mt-1 text-base font-bold tracking-tight">Proyeksi bulan ini</CardTitle>
-            </div>
-            <Sparkles className="size-4 text-primary" />
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="flex items-end justify-between gap-4">
+        <TiltCard intensity={5} glare={false} className="rounded-[1.5rem]">
+          <Card className="app-surface h-full rounded-[1.5rem] ring-0">
+            <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground">Sisa proyeksi</p>
-                <p className="tabular-money mt-1 text-xl font-bold">{money(data.prediction.projectedBalance)}</p>
+                <p className="app-eyebrow">AI forecast</p>
+                <CardTitle className="mt-1 text-base font-bold tracking-tight">Proyeksi bulan ini</CardTitle>
               </div>
-              <Badge variant={data.prediction.riskOverspend ? "destructive" : "secondary"} className="rounded-lg">
-                {data.prediction.riskOverspend ? "Perlu perhatian" : "On track"}
-              </Badge>
-            </div>
-            <div className="rounded-2xl bg-muted/65 p-4">
-              <div className="flex items-start gap-3">
-                <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-card text-primary shadow-sm">
-                  {data.overview.expenseChangePct <= 0 ? <TrendingDown className="size-4" /> : <TrendingUp className="size-4" />}
-                </span>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Pengeluaran {data.overview.expenseChangePct > 0 ? "naik" : "turun"} <strong className="text-foreground">{Math.abs(data.overview.expenseChangePct)}%</strong> dibanding bulan lalu. Saving rate saat ini <strong className="text-foreground">{primary?.savingRate ?? 0}%</strong>.
-                </p>
+              <span className="relative grid size-8 place-items-center">
+                <span aria-hidden className="glow-ring absolute inset-0 rounded-full bg-primary/25 blur-md" />
+                <Sparkles className="relative size-4 text-primary" />
+              </span>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="flex items-end justify-between gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Sisa proyeksi</p>
+                  <p className="tabular-money mt-1 text-xl font-bold">
+                    {privateMode ? (
+                      "••••••••"
+                    ) : (
+                      <CountUp
+                        value={data.prediction.projectedBalance}
+                        format={(value) => formatCurrency(value, primary?.currency ?? "IDR")}
+                      />
+                    )}
+                  </p>
+                </div>
+                <Badge variant={data.prediction.riskOverspend ? "destructive" : "secondary"} className="rounded-lg">
+                  {data.prediction.riskOverspend ? "Perlu perhatian" : "On track"}
+                </Badge>
               </div>
-            </div>
-            <Link href="/dashboard/agent" className="flex items-center justify-between text-xs font-semibold text-primary">
-              Minta analisis lengkap <ArrowRight className="size-4" />
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
+              <div className="rounded-2xl bg-muted/65 p-4">
+                <div className="flex items-start gap-3">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-card text-primary shadow-sm">
+                    {data.overview.expenseChangePct <= 0 ? <TrendingDown className="size-4" /> : <TrendingUp className="size-4" />}
+                  </span>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Pengeluaran {data.overview.expenseChangePct > 0 ? "naik" : "turun"} <strong className="text-foreground">{Math.abs(data.overview.expenseChangePct)}%</strong> dibanding bulan lalu. Saving rate saat ini <strong className="text-foreground">{primary?.savingRate ?? 0}%</strong>.
+                  </p>
+                </div>
+              </div>
+              <Link href="/dashboard/agent" className="group flex items-center justify-between text-xs font-semibold text-primary">
+                Minta analisis lengkap
+                <ArrowRight className="size-4 transition-transform duration-200 group-hover:translate-x-1" />
+              </Link>
+            </CardContent>
+          </Card>
+        </TiltCard>
+      </motion.div>
 
       {data.wallets.length > 0 && (
-        <section>
+        <motion.section variants={reveal} transition={revealTransition}>
           <div className="mb-3 flex items-center justify-between">
             <div>
               <p className="app-eyebrow">Accounts</p>
@@ -423,9 +499,18 @@ export default function OverviewPage() {
             </div>
             <Link href="/dashboard/wallets" className="text-[11px] font-semibold text-primary">Lihat semua</Link>
           </div>
-          <div className="hide-scrollbar -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-2 sm:px-0 xl:grid-cols-4">
-            {data.wallets.map((wallet) => (
-              <div key={wallet.id} className="app-surface min-w-[78vw] snap-center rounded-2xl p-4 sm:min-w-0">
+          <div className="hide-scrollbar scene-3d -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-2 sm:px-0 xl:grid-cols-4">
+            {data.wallets.map((wallet, index) => (
+              <motion.div
+                key={wallet.id}
+                initial={{ opacity: 0, y: 18, rotateY: -12 }}
+                whileInView={{ opacity: 1, y: 0, rotateY: 0 }}
+                viewport={{ once: true, margin: "-60px" }}
+                transition={{ delay: index * 0.06, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+                whileHover={{ y: -6, rotateX: 5 }}
+                style={{ transformPerspective: 900 }}
+                className="app-surface preserve-3d min-w-[78vw] shrink-0 snap-center rounded-2xl p-4 sm:min-w-0"
+              >
                 <div className="flex items-center justify-between gap-3">
                   <span className="flex items-center gap-2 text-xs font-semibold">
                     <span className="size-2.5 rounded-full" style={{ background: wallet.color ?? "#0f766e" }} />
@@ -434,22 +519,29 @@ export default function OverviewPage() {
                   <span className="text-[10px] font-bold text-muted-foreground">{wallet.currency}</span>
                 </div>
                 <p className="tabular-money mt-5 text-lg font-bold">{money(wallet.balance, wallet.currency)}</p>
-              </div>
+              </motion.div>
             ))}
           </div>
-        </section>
+        </motion.section>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <motion.div variants={reveal} transition={revealTransition} className="grid gap-4 lg:grid-cols-2">
         <Card className="app-surface rounded-[1.5rem] ring-0">
           <CardHeader><CardTitle className="text-sm font-bold">Pengeluaran terbesar</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             {data.overview.topCategories.length === 0 && <p className="text-xs text-muted-foreground">Belum ada pengeluaran bulan ini.</p>}
-            {data.overview.topCategories.slice(0, 5).map((category) => (
-              <div key={category.name} className="flex items-center justify-between gap-3 text-xs">
+            {data.overview.topCategories.slice(0, 5).map((category, index) => (
+              <motion.div
+                key={category.name}
+                initial={{ opacity: 0, x: -14 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: index * 0.06, duration: 0.4, ease: "easeOut" }}
+                className="flex items-center justify-between gap-3 text-xs"
+              >
                 <span className="flex items-center gap-2.5"><span className="size-2.5 rounded-full" style={{ background: category.color }} />{category.name}</span>
                 <span className="tabular-money font-semibold">{money(category.amount)}</span>
-              </div>
+              </motion.div>
             ))}
           </CardContent>
         </Card>
@@ -458,15 +550,23 @@ export default function OverviewPage() {
           <CardHeader><CardTitle className="text-sm font-bold">Budget pulse</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             {data.budgets.budgets.length === 0 && <p className="text-xs text-muted-foreground">Belum ada budget aktif.</p>}
-            {data.budgets.budgets.slice(0, 4).map((budget) => (
-              <div key={budget.categoryName} className="space-y-2">
+            {data.budgets.budgets.slice(0, 4).map((budget, index) => (
+              <motion.div
+                key={budget.categoryName}
+                initial={{ opacity: 0, y: 10 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: index * 0.07, duration: 0.4, ease: "easeOut" }}
+                className="space-y-2"
+              >
                 <div className="flex justify-between text-[11px]"><span>{budget.categoryName}</span><span className="font-semibold">{budget.percentUsed}%</span></div>
                 <Progress value={Math.min(budget.percentUsed, 100)} className="h-1.5" />
-              </div>
+              </motion.div>
             ))}
           </CardContent>
         </Card>
-      </div>
-    </div>
+      </motion.div>
+      </motion.div>
+    </>
   );
 }
