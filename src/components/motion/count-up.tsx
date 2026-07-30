@@ -14,7 +14,9 @@ export function CountUp({
 }) {
   const reduceMotion = useReducedMotion();
   const motionValue = useMotionValue(reduceMotion ? value : 0);
-  const text = useTransform(motionValue, (latest) => format(Math.round(latest)));
+  // No rounding here: the formatter owns precision (IDR shows 0 decimals, USD 2).
+  // Rounding first turned US$54.52 into US$55.00.
+  const text = useTransform(motionValue, (latest) => format(latest));
 
   useEffect(() => {
     if (reduceMotion) {
