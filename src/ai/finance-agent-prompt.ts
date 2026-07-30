@@ -1,4 +1,4 @@
-export type FinanceAgentChannel = "WHATSAPP" | "TELEGRAM" | "WEB";
+export type FinanceAgentChannel = "TELEGRAM" | "WEB";
 
 const CORE_PROMPT = `You are Ledgerly, the user's trusted personal finance chief of staff for Indonesian personal finance.
 

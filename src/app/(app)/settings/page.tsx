@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { WhatsAppSenderCard } from "@/components/settings/whatsapp-sender-card";
 import { toast } from "sonner";
 
 export default function SettingsPage() {
@@ -18,9 +17,7 @@ export default function SettingsPage() {
   const [ownerName, setOwnerName] = useState("");
   const [telegramBotToken, setTelegramBotToken] = useState("");
   const [telegramOwnerChatId, setTelegramOwnerChatId] = useState("");
-  const [whatsappOwnerPhone, setWhatsappOwnerPhone] = useState("");
   const [hasTelegram, setHasTelegram] = useState(false);
-  const [hasWhatsApp, setHasWhatsApp] = useState(false);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -34,9 +31,7 @@ export default function SettingsPage() {
         if (j.data.owner) {
           setOwnerName(j.data.owner.ownerName || "");
           setTelegramOwnerChatId(j.data.owner.telegramOwnerChatId || "");
-          setWhatsappOwnerPhone(j.data.owner.whatsappOwnerPhone || "");
           setHasTelegram(j.data.owner.hasTelegram);
-          setHasWhatsApp(j.data.owner.hasWhatsApp);
         }
       });
   }, []);
@@ -71,7 +66,6 @@ export default function SettingsPage() {
         ownerName,
         telegramBotToken: telegramBotToken || undefined,
         telegramOwnerChatId,
-        whatsappOwnerPhone,
       }),
     });
     const json = await res.json();
@@ -82,7 +76,6 @@ export default function SettingsPage() {
     toast.success("Owner & bot tersimpan");
     setTelegramBotToken("");
     setHasTelegram(json.data.owner.hasTelegram);
-    setHasWhatsApp(json.data.owner.hasWhatsApp);
   }
 
   return (
@@ -90,7 +83,7 @@ export default function SettingsPage() {
       <div>
         <h1 className="font-[family-name:var(--font-display)] text-4xl text-primary">Settings</h1>
         <p className="text-muted-foreground">
-          AI provider, API key, dan konfigurasi owner / bot (WA & Telegram).
+          AI provider, API key, dan konfigurasi owner / bot Telegram.
         </p>
       </div>
 
@@ -140,10 +133,7 @@ export default function SettingsPage() {
       <Card className="border-border/60 bg-white/70 shadow-none">
         <CardHeader>
           <CardTitle>Owner & Bot</CardTitle>
-          <CardDescription>
-            Status konfigurasi: Telegram {hasTelegram ? "✓" : "—"} · nomor owner WhatsApp{" "}
-            {hasWhatsApp ? "✓" : "—"}. Koneksi sender WhatsApp ditampilkan terpisah di bawah.
-          </CardDescription>
+          <CardDescription>Status konfigurasi: Telegram {hasTelegram ? "✓" : "—"}.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={saveOwner} className="space-y-4">
@@ -167,24 +157,10 @@ export default function SettingsPage() {
                 onChange={(e) => setTelegramOwnerChatId(e.target.value)}
               />
             </div>
-            <div className="space-y-2">
-              <Label>Nomor WhatsApp owner (pengguna)</Label>
-              <Input
-                value={whatsappOwnerPhone}
-                onChange={(e) => setWhatsappOwnerPhone(e.target.value)}
-                placeholder="62812..."
-              />
-              <p className="text-xs text-muted-foreground">
-                Nomor pribadi yang akan mengirim perintah ke sender. Format internasional tanpa +,
-                dan sebaiknya berbeda dari nomor sender.
-              </p>
-            </div>
             <Button type="submit">Simpan owner / bot</Button>
           </form>
         </CardContent>
       </Card>
-
-      <WhatsAppSenderCard ownerPhone={whatsappOwnerPhone} />
     </div>
   );
 }

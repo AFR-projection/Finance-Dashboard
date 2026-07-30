@@ -47,15 +47,13 @@ Buka: **http://localhost:3000**
 
 Alur baru (single owner, tanpa daftar publik):
 
-1. Pertama kali → otomatis ke **`/setup`** (isi nama owner + Telegram dan/atau WhatsApp)
+1. Pertama kali → otomatis ke **`/setup`** (isi nama owner + Telegram)
 2. Lalu **`/access`** → minta izin → bot kirim detail perangkat/lokasi → owner `/approve KODE`
 3. Dashboard terbuka (menu: Overview · Transactions · Analytics · Settings)
 
 ```bash
 # terminal lain (opsional, untuk approve via bot)
 npm run worker:telegram
-# dan/atau
-npm run worker:whatsapp
 ```
 
 ---
@@ -71,7 +69,7 @@ Panduan produksi: **[DEPLOY.md](../DEPLOY.md)**
 - npm 10+
 - Neon PostgreSQL (atau Postgres lokal) — **wajib**
 - Redis — opsional di local
-- Telegram / WhatsApp — opsional
+- Telegram bot token — **wajib** (dibuat lewat BotFather)
 
 ## 1. Clone & install (local dev)
 
@@ -91,7 +89,7 @@ Edit `.env`:
 | `AUTH_SECRET` | Yes | string random panjang |
 | `AUTH_URL` | Yes | `http://localhost:3000` |
 | `ENCRYPTION_KEY` | Yes | 64 hex chars |
-| `WHATSAPP_WORKER_SECRET` | Yes | bebas untuk local |
+| `WORKER_SECRET` | Yes | bebas untuk local |
 | `REDIS_URL` | No | kosongkan di local |
 | `OPENROUTER_API_KEY` | No | atau isi di Settings UI |
 
@@ -109,38 +107,15 @@ npm run db:seed
 npm run dev
 ```
 
-Perintah ini menjalankan web, Telegram worker, dan WhatsApp worker sekaligus. Untuk web saja,
+Perintah ini menjalankan web dan Telegram worker sekaligus. Untuk web saja,
 gunakan `npm run dev:web`.
 
-Open http://localhost:3000 → Register → Settings (AI key + QR sender WhatsApp).
-
-### Cara menambah / menghubungkan sender WhatsApp (Baileys)
-
-WhatsApp **bukan** seperti BotFather. “Bot”-nya = **nomor HP yang kamu scan QR** (bisa nomor spare / kedua). Nomor itu jadi inbox yang membalas user.
-
-1. Isi di `.env`:
-   - `WHATSAPP_WORKER_SECRET` (sama dengan yang dipakai app)
-   - `NEXT_PUBLIC_APP_URL=http://localhost:3000`
-   - `WHATSAPP_AUTH_DIR=./workers/.wa-auth`
-2. Jalankan `npm run dev` agar app dan worker aktif bersama.
-3. Buka Settings → **WhatsApp Sender (Baileys)**.
-4. **QR muncul di Settings dan terminal** → buka WhatsApp di HP → Linked Devices → Link a device → scan.
-5. Session tersimpan di `workers/.wa-auth` (jangan dihapus; ini biar tidak logout terus).
-6. Di dashboard → **Channels** → Generate pairing code.
-7. Dari HP **lain** (atau kontak kamu), kirim chat ke nomor yang baru di-link:
-   - `link KODE` — tautkan akun web
-   - lalu coba: `beli kopi 25 ribu`
-   - login confirm: `approve KODE` / `reject KODE`
-
-Tips:
-- Pakai **nomor kedua** untuk bot, nomor utama untuk testing sebagai user.
-- Kalau QR tidak muncul / logged out: hapus folder `workers/.wa-auth` lalu jalankan ulang worker.
-- Di VPS sama saja: `pm2 logs ledgerly-whatsapp` untuk lihat QR.
+Open http://localhost:3000 → `/setup` → Settings (AI key + bot Telegram).
 
 ## 5. Architecture reminder
 
 ```
-User message (WA/TG/Web)
+User message (Telegram/Web)
   → AI Agent (intent + tools)
   → Finance Engine (Zod + business rules)
   → PostgreSQL (source of truth)
@@ -149,14 +124,7 @@ User message (WA/TG/Web)
 
 AI never writes the database directly.
 
-## 6. First WhatsApp connect
-
-1. Start `whatsapp-worker`
-2. Scan QR printed in the terminal (or dashboard if `WHATSAPP_OWNER_USER_ID` set)
-3. Generate pairing code in Channels
-4. Message the connected WhatsApp: `link ABC123`
-
-## 7. Tests
+## 6. Tests
 
 ```bash
 npm test

@@ -148,7 +148,7 @@ function LoginForm() {
       <div className="mt-8 space-y-4 rounded-xl border border-border/60 bg-white/70 p-4">
         <h2 className="font-semibold text-primary">Konfirmasi via Bot</h2>
         <p className="text-sm text-muted-foreground">
-          {reason || "Perangkat/lokasi perlu validasi. Setujui login dari Telegram atau WhatsApp."}
+          {reason || "Perangkat/lokasi perlu validasi. Setujui login dari Telegram."}
         </p>
         {confirmCode && (
           <p className="font-[family-name:var(--font-display)] text-3xl tracking-widest text-primary">

@@ -63,4 +63,3 @@ process.once("SIGTERM", () => void shutdown(0));
 // local development to exactly one getUpdates consumer.
 start("web", "server.ts", { required: true, env: { TELEGRAM_EMBEDDED: "0" } });
 start("telegram-worker", "workers/telegram/index.ts");
-start("whatsapp-worker", "workers/whatsapp/index.ts");

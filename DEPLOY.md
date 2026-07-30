@@ -79,7 +79,7 @@ Installer akan:
 2. Validasi `DATABASE_URL` Neon  
 3. Generate secrets kosong  
 4. **Auto-detect port kosong** (aman di VPS multi-app)  
-5. Build & up: `app` + `redis` + bot workers  
+5. Build & up: `app` + `redis` + `telegram-worker`  
 6. Generate Nginx + Certbot HTTPS (jika `APP_DOMAIN` diisi)  
 7. Health-check PostgreSQL + Redis melalui `/api/health`; instalasi berhenti jika tidak sehat
 
@@ -95,7 +95,6 @@ Buka URL yang dicetak script → **`/setup`** → lalu **`/access`** → approve
 Internet → Nginx (:443 / SSL) → Next.js App (auto-port host)
                               ↘ Redis (internal Docker)
 Neon PostgreSQL (external DB)
-WhatsApp Baileys (worker + volume persistent wa_auth)
 Telegram worker (Grammy)
 ```
 
@@ -104,7 +103,7 @@ Telegram worker (Grammy)
 | Next.js + Socket.io | Container `app` | 1 port host (auto) |
 | Redis | Container internal | Session/cache worker |
 | PostgreSQL | **Neon cloud** | Sumber kebenaran data |
-| WA session | Volume `wa_auth` | Persist QR login |
+| Telegram bot | Container `telegram-worker` | Grammy long polling |
 
 ---
 
@@ -116,7 +115,7 @@ Telegram worker (Grammy)
 ./update.sh               # git pull + rebuild + sync Neon
 ./scripts/status.sh
 ./scripts/logs.sh app
-./scripts/logs.sh whatsapp-worker
+./scripts/logs.sh telegram-worker
 ./scripts/stop.sh
 ```
 

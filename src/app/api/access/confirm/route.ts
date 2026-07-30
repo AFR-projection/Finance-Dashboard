@@ -15,10 +15,10 @@ const schema = z.object({
   code: z.string().min(4).max(16),
 });
 
-/** Called by WhatsApp/Telegram workers with worker secret */
+/** Called by the Telegram worker with worker secret */
 export async function POST(request: Request) {
   const secret = request.headers.get("x-worker-secret");
-  if (!secret || secret !== process.env.WHATSAPP_WORKER_SECRET) {
+  if (!secret || secret !== process.env.WORKER_SECRET) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 

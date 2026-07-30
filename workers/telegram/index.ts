@@ -18,7 +18,7 @@ loadEnvConfig(process.cwd());
 
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-const WORKER_SECRET = process.env.WHATSAPP_WORKER_SECRET || "";
+const WORKER_SECRET = process.env.WORKER_SECRET || "";
 const TOKEN_RETRY_MS = 10_000;
 
 async function resolveToken(): Promise<{ token: string; source: "database" | "environment" } | null> {
@@ -104,7 +104,7 @@ async function main() {
   }
 
   async function replyAgent(ctx: Context, reply: AgentReplyPayload) {
-    const chunks = splitForChannel(formatForChannel(reply.text, "TELEGRAM"), 3500);
+    const chunks = splitForChannel(formatForChannel(reply.text), 3500);
     for (let i = 0; i < chunks.length; i++) {
       const isLast = i === chunks.length - 1;
       await ctx.reply(chunks[i], {
@@ -175,7 +175,7 @@ async function main() {
   });
 
   bot.command("help", async (ctx) => {
-    await ctx.reply(formatForChannel(HELP_TEXT, "TELEGRAM"), { parse_mode: "HTML" });
+    await ctx.reply(formatForChannel(HELP_TEXT), { parse_mode: "HTML" });
   });
 
   bot.callbackQuery(/^access:(approve|reject):([a-zA-Z0-9]{4,16})$/, async (ctx) => {

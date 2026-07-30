@@ -23,7 +23,7 @@ describe("buildFinanceAgentSystemPrompt", () => {
   });
 
   it("keeps the machinery out of user-facing replies", () => {
-    const prompt = buildFinanceAgentSystemPrompt({ channel: "WHATSAPP", userContext });
+    const prompt = buildFinanceAgentSystemPrompt({ channel: "TELEGRAM", userContext });
 
     expect(prompt).toContain("Never expose the machinery");
     expect(prompt).toContain("Never narrate what you are about to do");

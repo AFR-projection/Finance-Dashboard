@@ -5,7 +5,7 @@ import { createPairingCode, consumePairingCode } from "@/lib/pairing";
 import { NextResponse } from "next/server";
 
 const linkSchema = z.object({
-  channel: z.enum(["WHATSAPP", "TELEGRAM"]),
+  channel: z.literal("TELEGRAM"),
   externalId: z.string().min(3).max(120),
   displayName: z.string().max(120).optional(),
 });
@@ -13,8 +13,7 @@ const linkSchema = z.object({
 export async function GET(request: Request) {
   return withApiGuard(request, async (userId) => {
     const links = await prisma.channelLink.findMany({ where: { userId } });
-    const wa = await prisma.whatsAppSession.findUnique({ where: { userId } });
-    return jsonOk({ userId, links, whatsapp: wa });
+    return jsonOk({ userId, links });
   });
 }
 
@@ -29,7 +28,6 @@ export async function POST(request: Request) {
         expiresInMinutes: 10,
         instructions: {
           telegram: `Kirim /link ${code} ke bot Telegram`,
-          whatsapp: `Kirim: link ${code} ke nomor WhatsApp bot`,
         },
       });
     }
@@ -61,12 +59,12 @@ export async function POST(request: Request) {
 /** Worker-facing pair endpoint — authenticated via worker secret */
 export async function PUT(request: Request) {
   const secret = request.headers.get("x-worker-secret");
-  if (!secret || secret !== process.env.WHATSAPP_WORKER_SECRET) {
+  if (!secret || secret !== process.env.WORKER_SECRET) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
   const schema = z.object({
-    channel: z.enum(["WHATSAPP", "TELEGRAM"]),
+    channel: z.literal("TELEGRAM"),
     externalId: z.string().min(1),
     code: z.string().min(4).max(16),
     displayName: z.string().max(120).optional(),

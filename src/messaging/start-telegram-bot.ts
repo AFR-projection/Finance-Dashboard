@@ -34,7 +34,7 @@ export async function startEmbeddedTelegramBot() {
   }
 
   const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://127.0.0.1:3000";
-  const WORKER_SECRET = process.env.WHATSAPP_WORKER_SECRET || "";
+  const WORKER_SECRET = process.env.WORKER_SECRET || "";
 
   const bot = new Bot(token);
 
@@ -100,7 +100,7 @@ export async function startEmbeddedTelegramBot() {
   }
 
   async function replyAgent(ctx: Context, reply: { text: string; walletPrompt?: WalletPrompt }) {
-    const chunks = splitForChannel(formatForChannel(reply.text, "TELEGRAM"), 3500);
+    const chunks = splitForChannel(formatForChannel(reply.text), 3500);
     for (let i = 0; i < chunks.length; i++) {
       const isLast = i === chunks.length - 1;
       await ctx.reply(chunks[i], {
@@ -121,7 +121,7 @@ export async function startEmbeddedTelegramBot() {
   });
 
   bot.command("help", async (ctx) => {
-    await ctx.reply(formatForChannel(HELP_TEXT, "TELEGRAM"), { parse_mode: "HTML" });
+    await ctx.reply(formatForChannel(HELP_TEXT), { parse_mode: "HTML" });
   });
 
   for (const { command, prompt } of AGENT_COMMAND_LIST) {

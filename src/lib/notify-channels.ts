@@ -19,8 +19,6 @@ export async function notifyLinkedChannels(userId: string, message: string) {
           }),
         });
       }
-      // WhatsApp: user must be messaged by Baileys worker; store pending in Redis pub optional.
-      // For now Telegram push is primary; WhatsApp users use the code shown on screen.
     }),
   );
 

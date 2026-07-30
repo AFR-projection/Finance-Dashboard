@@ -24,7 +24,7 @@ const schema = z.object({
  */
 export async function POST(request: Request) {
   const secret = request.headers.get("x-worker-secret");
-  const isWorker = Boolean(secret && secret === process.env.WHATSAPP_WORKER_SECRET);
+  const isWorker = Boolean(secret && secret === process.env.WORKER_SECRET);
 
   if (!isWorker) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });

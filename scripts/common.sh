@@ -285,14 +285,13 @@ prepare_env_secrets() {
     ok "ENCRYPTION_KEY digenerate"
   fi
 
-  v="$(get_env_var WHATSAPP_WORKER_SECRET "$ENV_FILE")"
+  v="$(get_env_var WORKER_SECRET "$ENV_FILE")"
   if [[ -z "$v" || "$v" == "change-me-shared-secret" ]]; then
-    set_env_var WHATSAPP_WORKER_SECRET "$(rand_hex)" "$ENV_FILE"
-    ok "WHATSAPP_WORKER_SECRET digenerate"
+    set_env_var WORKER_SECRET "$(rand_hex)" "$ENV_FILE"
+    ok "WORKER_SECRET digenerate"
   fi
 
   set_env_var HOSTNAME "0.0.0.0" "$ENV_FILE"
-  set_env_var WHATSAPP_AUTH_DIR "/data/wa-auth" "$ENV_FILE"
   set_env_var TELEGRAM_EMBEDDED "0" "$ENV_FILE"
   set_env_var REDIS_URL "redis://redis:6379" "$ENV_FILE"
   secure_env_file

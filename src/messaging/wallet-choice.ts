@@ -43,25 +43,10 @@ export function walletKeyboard(prompt: WalletPrompt) {
 }
 
 /**
- * WhatsApp revoked interactive buttons for personal accounts, so the choice is
- * offered as a numbered list and resolved from the user's next reply instead.
- */
-export function walletPromptText(prompt: WalletPrompt): string {
-  return [
-    prompt.question,
-    "",
-    ...prompt.wallets.map((w, i) => `${i + 1}. ${w.name} (${w.currency})`),
-    "0. Batalkan",
-    "",
-    "Balas dengan nomornya, atau nama rekeningnya.",
-  ].join("\n");
-}
-
-/**
- * Resolves a reply to the numbered list above. Matching runs server-side rather
- * than through the model so a plain "2" can never land on the wrong account.
- * Returns undefined when the reply is not a choice at all, so the message falls
- * through to the agent as ordinary conversation.
+ * Resolves a typed reply to the account buttons above. Matching runs
+ * server-side rather than through the model so a plain "2" can never land on
+ * the wrong account. Returns undefined when the reply is not a choice at all,
+ * so the message falls through to the agent as ordinary conversation.
  */
 export function resolveWalletReply(
   reply: string,

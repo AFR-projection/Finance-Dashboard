@@ -15,7 +15,6 @@ export default function SetupPage() {
   const [ownerName, setOwnerName] = useState("");
   const [telegramBotToken, setTelegramBotToken] = useState("");
   const [telegramOwnerChatId, setTelegramOwnerChatId] = useState("");
-  const [whatsappOwnerPhone, setWhatsappOwnerPhone] = useState("");
 
   useEffect(() => {
     fetch("/api/setup")
@@ -43,7 +42,6 @@ export default function SetupPage() {
         ownerName,
         telegramBotToken,
         telegramOwnerChatId,
-        whatsappOwnerPhone,
       }),
     });
     const json = await res.json();
@@ -72,8 +70,7 @@ export default function SetupPage() {
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
           Platform self-hosted untuk <strong>satu pemilik</strong>. Tidak ada daftar publik.
-          Sebelum dashboard bisa dibuka, wajib set owner + minimal 1 bot (Telegram dan/atau
-          WhatsApp).
+          Sebelum dashboard bisa dibuka, wajib set owner + bot Telegram.
         </p>
       </div>
 
@@ -97,7 +94,7 @@ export default function SetupPage() {
             </div>
 
             <div className="rounded-lg border border-border/50 p-3 space-y-3">
-              <p className="text-sm font-medium">Telegram (opsional tapi direkomendasikan)</p>
+              <p className="text-sm font-medium">Telegram</p>
               <div className="space-y-1">
                 <Label>Bot token (BotFather)</Label>
                 <Input
@@ -116,22 +113,6 @@ export default function SetupPage() {
               </div>
               <p className="text-xs text-muted-foreground">
                 Tip: start bot kamu, lalu buka API getUpdates atau pakai @userinfobot.
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-border/50 p-3 space-y-3">
-              <p className="text-sm font-medium">WhatsApp owner (opsional)</p>
-              <div className="space-y-1">
-                <Label>Nomor owner (internasional, tanpa +)</Label>
-                <Input
-                  value={whatsappOwnerPhone}
-                  onChange={(e) => setWhatsappOwnerPhone(e.target.value)}
-                  placeholder="62812xxxxxxx"
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Nomor yang akan mengirim <code>approve KODE</code> ke bot Baileys. Jalankan{" "}
-                <code>npm run worker:whatsapp</code> / container WA setelah setup.
               </p>
             </div>
 

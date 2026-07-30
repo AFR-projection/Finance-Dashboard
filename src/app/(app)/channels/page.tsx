@@ -5,13 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "sonner";
 
 type Link = {
@@ -22,16 +15,8 @@ type Link = {
   isActive: boolean;
 };
 
-type WaSession = {
-  isConnected: boolean;
-  phoneNumber: string | null;
-  lastQr: string | null;
-} | null;
-
 export default function ChannelsPage() {
   const [links, setLinks] = useState<Link[]>([]);
-  const [wa, setWa] = useState<WaSession>(null);
-  const [channel, setChannel] = useState("TELEGRAM");
   const [externalId, setExternalId] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [pairCode, setPairCode] = useState<string | null>(null);
@@ -40,7 +25,6 @@ export default function ChannelsPage() {
     const res = await fetch("/api/channels");
     const json = await res.json();
     setLinks(json.data?.links ?? []);
-    setWa(json.data?.whatsapp ?? null);
   }
 
   useEffect(() => {
@@ -72,7 +56,7 @@ export default function ChannelsPage() {
     const res = await fetch("/api/channels", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channel, externalId, displayName }),
+      body: JSON.stringify({ channel: "TELEGRAM", externalId, displayName }),
     });
     if (res.ok) {
       toast.success("Channel linked");
@@ -88,17 +72,14 @@ export default function ChannelsPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
         <h1 className="font-[family-name:var(--font-display)] text-4xl text-primary">Channels</h1>
-        <p className="text-muted-foreground">
-          Hubungkan WhatsApp (Baileys) dan Telegram Bot ke akun Anda.
-        </p>
+        <p className="text-muted-foreground">Hubungkan Telegram Bot ke akun Anda.</p>
       </div>
 
       <Card className="border-border/60 bg-white/70 shadow-none">
         <CardHeader>
           <CardTitle>Pairing code (disarankan)</CardTitle>
           <CardDescription>
-            Generate kode, lalu kirim dari chat: Telegram <code>/link KODE</code> atau WhatsApp{" "}
-            <code>link KODE</code>.
+            Generate kode, lalu kirim <code>/link KODE</code> ke bot Telegram.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -116,57 +97,19 @@ export default function ChannelsPage() {
         </CardContent>
       </Card>
 
-      {wa && (
-        <Card className="border-border/60 bg-white/70 shadow-none">
-          <CardHeader>
-            <CardTitle>WhatsApp session</CardTitle>
-            <CardDescription>
-              Status koneksi Baileys worker dan QR pairing terbaru.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm">
-              Status:{" "}
-              <span className={wa.isConnected ? "text-emerald-700" : "text-amber-700"}>
-                {wa.isConnected ? "Connected" : "Disconnected"}
-              </span>
-              {wa.phoneNumber ? ` · ${wa.phoneNumber}` : ""}
-            </p>
-            {!wa.isConnected && wa.lastQr && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={wa.lastQr} alt="WhatsApp QR" className="mx-auto max-w-[240px] rounded-lg" />
-            )}
-          </CardContent>
-        </Card>
-      )}
-
       <Card className="border-border/60 bg-white/70 shadow-none">
         <CardHeader>
           <CardTitle>Manual link</CardTitle>
-          <CardDescription>
-            Telegram: chat ID numerik. WhatsApp: nomor internasional tanpa +.
-          </CardDescription>
+          <CardDescription>Masukkan chat ID numerik Telegram Anda.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label>Channel</Label>
-              <Select value={channel} onValueChange={(v) => setChannel(v ?? "TELEGRAM")}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="TELEGRAM">Telegram</SelectItem>
-                  <SelectItem value="WHATSAPP">WhatsApp</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>External ID</Label>
+              <Label>Chat ID</Label>
               <Input
                 value={externalId}
                 onChange={(e) => setExternalId(e.target.value)}
-                placeholder={channel === "TELEGRAM" ? "123456789" : "6281234567890"}
+                placeholder="123456789"
                 required
               />
             </div>
@@ -210,8 +153,8 @@ export default function ChannelsPage() {
         <CardHeader>
           <CardTitle>Worker setup (VPS)</CardTitle>
           <CardDescription>
-            Jalankan via Docker Compose: service <code>telegram-worker</code> dan{" "}
-            <code>whatsapp-worker</code>. Lihat <code>docs/DEPLOYMENT.md</code>.
+            Jalankan via Docker Compose: service <code>telegram-worker</code>. Lihat{" "}
+            <code>docs/DEPLOYMENT.md</code>.
           </CardDescription>
         </CardHeader>
       </Card>

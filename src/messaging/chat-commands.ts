@@ -1,7 +1,7 @@
 /**
- * Slash commands shared by both chat channels. Telegram registers them through
- * grammY, WhatsApp has no command registry at all, so the mapping lives here to
- * keep the two channels answering the same words the same way.
+ * Slash commands the chat channels answer. Telegram registers them through
+ * grammY; the web agent resolves the same words here so both surfaces stay in
+ * step.
  */
 
 export type ChatCommand =
@@ -53,7 +53,7 @@ const AGENT_COMMANDS: Record<string, { prompt: string; description: string }> = 
   },
 };
 
-/** Feeds Telegram's command menu; WhatsApp has no equivalent to register. */
+/** Feeds Telegram's command menu. */
 export const AGENT_COMMAND_LIST = Object.entries(AGENT_COMMANDS).map(([command, spec]) => ({
   command,
   prompt: spec.prompt,

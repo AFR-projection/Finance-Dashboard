@@ -16,7 +16,7 @@ const instrument = Instrument_Serif({
 
 export const metadata = {
   title: "Ledgerly — AI Financial OS",
-  description: "Personal AI finance assistant with WhatsApp, Telegram, and premium dashboard.",
+  description: "Personal AI finance assistant with Telegram and a premium dashboard.",
 };
 
 export const viewport = {

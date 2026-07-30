@@ -23,7 +23,6 @@ enum ShareVisibility {
 }
 
 enum ChannelType {
-  WHATSAPP
   TELEGRAM
   WEB
 }
@@ -49,7 +48,6 @@ model User {
   aiInsights    AiInsight[]
   shareProfile  ShareProfile?
   channels      ChannelLink[]
-  whatsappSession WhatsAppSession?
   trustedDevices TrustedDevice[]
   accessSessions AccessSession[]
   pendingTransactions PendingTransaction[]
@@ -281,21 +279,6 @@ model ChannelLink {
   @@map("channel_links")
 }
 
-model WhatsAppSession {
-  id           String   @id @default(cuid())
-  userId       String   @unique @map("user_id")
-  sessionData  String?  @map("session_data") @db.Text
-  phoneNumber  String?  @map("phone_number")
-  isConnected  Boolean  @default(false) @map("is_connected")
-  lastQr       String?  @map("last_qr") @db.Text
-  updatedAt    DateTime @updatedAt @map("updated_at")
-  createdAt    DateTime @default(now()) @map("created_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("whatsapp_sessions")
-}
-
 /// Known browsers/devices for login risk scoring (fingerprint + last geo)
 model TrustedDevice {
   id            String   @id @default(cuid())
@@ -401,7 +384,6 @@ model AppConfig {
   ownerName            String?  @map("owner_name")
   telegramBotToken     String?  @map("telegram_bot_token") @db.Text
   telegramOwnerChatId  String?  @map("telegram_owner_chat_id")
-  whatsappOwnerPhone   String?  @map("whatsapp_owner_phone")
   setupCompleted       Boolean  @default(false) @map("setup_completed")
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")

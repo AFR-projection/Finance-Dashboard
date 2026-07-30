@@ -135,7 +135,7 @@ API keys are AES-GCM encrypted at rest.
 - `GET|PUT /api/share`
 - `GET /api/share/:token` (public aggregates only)
 
-## Channels (WhatsApp / Telegram)
+## Channels (Telegram)
 
 ### `GET /api/channels`
 
@@ -164,7 +164,3 @@ Worker-only pairing (`x-worker-secret`):
 ### `POST /api/channels/ingress`
 
 Worker-only message processing (`x-worker-secret`).
-
-### `POST /api/channels/whatsapp-session`
-
-Worker-only WhatsApp QR/status sync.

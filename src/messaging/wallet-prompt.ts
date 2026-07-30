@@ -6,7 +6,7 @@ export const WALLET_PROMPT_MARKER = "__walletPrompt" as const;
 /**
  * A transaction the agent understood but did not write, because more than one
  * wallet could plausibly be charged. The chat worker renders `wallets` as
- * buttons (Telegram) or a numbered list (WhatsApp).
+ * buttons.
  */
 export type WalletPromptToolResult = {
   [WALLET_PROMPT_MARKER]: WalletPrompt;

@@ -7,7 +7,7 @@ const TTL_MINUTES = 30;
 
 export type PendingTransactionDraft = {
   userId: string;
-  channel: "WHATSAPP" | "TELEGRAM" | "WEB";
+  channel: "TELEGRAM" | "WEB";
   type: "INCOME" | "EXPENSE";
   amount: number;
   category: string;
@@ -46,7 +46,7 @@ export async function purgeExpiredPendingTransactions() {
 
 export async function findLivePendingTransaction(
   userId: string,
-  channel: "WHATSAPP" | "TELEGRAM" | "WEB",
+  channel: "TELEGRAM" | "WEB",
 ) {
   return prisma.pendingTransaction.findFirst({
     where: { userId, channel, expiresAt: { gt: new Date() } },
@@ -63,7 +63,7 @@ export async function confirmPendingTransaction(params: {
   pendingId: string;
   userId: string;
   walletId: string;
-  channel?: "WHATSAPP" | "TELEGRAM" | "WEB";
+  channel?: "TELEGRAM" | "WEB";
 }) {
   const pending = await prisma.pendingTransaction.findFirst({
     where: {
@@ -96,7 +96,7 @@ export async function confirmPendingTransaction(params: {
 export async function cancelPendingTransaction(
   pendingId: string,
   userId: string,
-  channel?: "WHATSAPP" | "TELEGRAM" | "WEB",
+  channel?: "TELEGRAM" | "WEB",
 ) {
   const deleted = await prisma.pendingTransaction.deleteMany({
     where: { id: pendingId, userId, channel },

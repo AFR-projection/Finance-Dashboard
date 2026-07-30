@@ -17,7 +17,7 @@ import { listActiveWalletChoices } from "./wallet-prompt";
  */
 export async function settlePendingWalletReply(params: {
   userId: string;
-  channel: "WHATSAPP" | "TELEGRAM" | "WEB";
+  channel: "TELEGRAM" | "WEB";
   reply: string;
 }): Promise<string | null> {
   await purgeExpiredPendingTransactions();

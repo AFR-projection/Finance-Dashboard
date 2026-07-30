@@ -89,36 +89,8 @@ services:
     entrypoint: ["npx", "tsx", "workers/telegram/index.ts"]
     logging: *default-logging
 
-  whatsapp-worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      args:
-        DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build?schema=public
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      REDIS_URL: redis://redis:6379
-      NEXT_PUBLIC_APP_URL: http://app:3000
-      WHATSAPP_AUTH_DIR: /data/wa-auth
-      DOCKER: "1"
-      SKIP_DB_PUSH: "1"
-    volumes:
-      - wa_auth:/data/wa-auth
-    depends_on:
-      app:
-        condition: service_healthy
-    networks:
-      - ledgerly_net
-    # Baileys 7 + whatsapp-rust-bridge are ESM-only. The nested worker
-    # package.json marks this TypeScript entrypoint as ESM for tsx.
-    entrypoint: ["npx", "tsx", "workers/whatsapp/index.ts"]
-    logging: *default-logging
-
 volumes:
   redis_data:
-  wa_auth:
 
 networks:
   ledgerly_net:

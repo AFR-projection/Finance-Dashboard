@@ -4,7 +4,6 @@ import {
   resolveWalletReply,
   walletCallbackData,
   walletKeyboard,
-  walletPromptText,
 } from "./wallet-choice";
 
 const PENDING = "clx1pending000000000000000";
@@ -63,23 +62,18 @@ const WALLETS = [
   { id: "w3", name: "ABA", currency: "USD" },
 ];
 
-describe("walletPromptText", () => {
-  it("numbers the accounts in the same order resolveWalletReply expects", () => {
-    const text = walletPromptText({
+describe("resolveWalletReply", () => {
+  it("matches the button order the keyboard renders", () => {
+    const keyboard = walletKeyboard({
       pendingId: PENDING,
       question: "Pengeluaran makan — pilih rekening:",
       wallets: WALLETS,
     });
 
-    expect(text).toContain("1. BCA (IDR)");
-    expect(text).toContain("2. Mandiri (IDR)");
-    expect(text).toContain("3. ABA (USD)");
-    expect(text).toContain("0. Batalkan");
+    expect(keyboard.inline_keyboard[1][0].text).toBe("Mandiri (IDR)");
     expect(resolveWalletReply("2", WALLETS)).toEqual({ walletId: "w2" });
   });
-});
 
-describe("resolveWalletReply", () => {
   it("matches by list position", () => {
     expect(resolveWalletReply("1", WALLETS)).toEqual({ walletId: "w1" });
     expect(resolveWalletReply("3.", WALLETS)).toEqual({ walletId: "w3" });

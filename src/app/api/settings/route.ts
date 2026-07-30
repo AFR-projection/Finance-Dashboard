@@ -20,9 +20,7 @@ export async function GET(request: Request) {
       owner: {
         ownerName: owner.ownerName,
         hasTelegram: owner.hasTelegram,
-        hasWhatsApp: owner.hasWhatsApp,
         telegramOwnerChatId: owner.telegramOwnerChatId,
-        whatsappOwnerPhone: owner.whatsappOwnerPhone,
         isReady: owner.isReady,
       },
     });
@@ -40,10 +38,18 @@ export async function PUT(request: Request) {
           ownerName: body.ownerName,
           telegramBotToken: body.telegramBotToken,
           telegramOwnerChatId: body.telegramOwnerChatId,
-          whatsappOwnerPhone: body.whatsappOwnerPhone,
         });
         // keep channel links in sync
         if (owner.telegramOwnerChatId) {
+          // Retire links for a previously registered chat so it can no longer
+          // drive the account after the owner switches bots.
+          await prisma.channelLink.deleteMany({
+            where: {
+              channel: "TELEGRAM",
+              userId,
+              externalId: { not: owner.telegramOwnerChatId },
+            },
+          });
           await prisma.channelLink.upsert({
             where: {
               channel_externalId: {
@@ -56,32 +62,6 @@ export async function PUT(request: Request) {
               userId,
               channel: "TELEGRAM",
               externalId: owner.telegramOwnerChatId,
-              displayName: "Owner",
-            },
-          });
-        }
-        if (owner.whatsappOwnerPhone) {
-          // Retire links for a previously registered number so it can no longer
-          // drive the account after the owner switches phones.
-          await prisma.channelLink.deleteMany({
-            where: {
-              channel: "WHATSAPP",
-              userId,
-              externalId: { not: owner.whatsappOwnerPhone },
-            },
-          });
-          await prisma.channelLink.upsert({
-            where: {
-              channel_externalId: {
-                channel: "WHATSAPP",
-                externalId: owner.whatsappOwnerPhone,
-              },
-            },
-            update: { userId, isActive: true },
-            create: {
-              userId,
-              channel: "WHATSAPP",
-              externalId: owner.whatsappOwnerPhone,
               displayName: "Owner",
             },
           });

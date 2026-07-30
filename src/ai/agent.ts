@@ -139,7 +139,7 @@ export async function runFinanceAgent(params: {
   userId: string;
   message: string;
   config: AiRuntimeConfig;
-  channel?: "WHATSAPP" | "TELEGRAM" | "WEB";
+  channel?: "TELEGRAM" | "WEB";
 }): Promise<AgentReply> {
   const { userId, message, config, channel = "WEB" } = params;
   if (!config.apiKey) {
@@ -164,7 +164,7 @@ async function runOpenRouter(params: {
   userId: string;
   message: string;
   config: AiRuntimeConfig;
-  channel: "WHATSAPP" | "TELEGRAM" | "WEB";
+  channel: "TELEGRAM" | "WEB";
   history: AgentMessage[];
 }): Promise<AgentReply> {
   const userContext = await loadUserContext(params.userId);

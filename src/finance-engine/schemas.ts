@@ -12,7 +12,7 @@ export const createTransactionSchema = z.object({
   description: z.string().min(1).max(500),
   paymentMethod: z.string().max(80).optional().nullable(),
   transactionDate: z.coerce.date().optional(),
-  channel: z.enum(["WHATSAPP", "TELEGRAM", "WEB"]).default("WEB"),
+  channel: z.enum(["TELEGRAM", "WEB"]).default("WEB"),
   rawInput: z.string().max(2000).optional().nullable(),
 });
 
@@ -74,7 +74,7 @@ export const shareSettingsSchema = z.object({
 
 export const agentMessageSchema = z.object({
   message: z.string().min(1).max(4000),
-  channel: z.enum(["WHATSAPP", "TELEGRAM", "WEB"]).default("WEB"),
+  channel: z.enum(["TELEGRAM", "WEB"]).default("WEB"),
 });
 
 export const createWalletSchema = z.object({

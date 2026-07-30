@@ -1,64 +1,54 @@
 import { describe, expect, it } from "vitest";
 import { formatForChannel, splitForChannel } from "./chat-format";
 
-describe("formatForChannel — WhatsApp", () => {
-  it("converts bold to WhatsApp syntax", () => {
-    expect(formatForChannel("**Ringkasan** bulan ini", "WHATSAPP")).toBe("*Ringkasan* bulan ini");
+describe("formatForChannel", () => {
+  it("emits HTML tags", () => {
+    expect(formatForChannel("**Ringkasan**")).toBe("<b>Ringkasan</b>");
+  });
+
+  it("escapes characters that would break HTML parsing", () => {
+    expect(formatForChannel("untung > rugi & aman")).toBe("untung &gt; rugi &amp; aman");
+  });
+
+  it("escapes inside emphasis too", () => {
+    expect(formatForChannel("**a > b**")).toBe("<b>a &gt; b</b>");
   });
 
   it("converts headings to bold lines", () => {
-    expect(formatForChannel("### Analisis", "WHATSAPP")).toBe("*Analisis*");
+    expect(formatForChannel("### Analisis")).toBe("<b>Analisis</b>");
   });
 
   it("normalizes bullets", () => {
-    expect(formatForChannel("- kopi 25 ribu\n- makan 35 ribu", "WHATSAPP")).toBe(
+    expect(formatForChannel("- kopi 25 ribu\n- makan 35 ribu")).toBe(
       "• kopi 25 ribu\n• makan 35 ribu",
     );
   });
 
   it("keeps single-asterisk italic from turning into stray markers", () => {
-    expect(formatForChannel("ini *penting* ya", "WHATSAPP")).toBe("ini _penting_ ya");
+    expect(formatForChannel("ini *penting* ya")).toBe("ini <i>penting</i> ya");
   });
 
   it("does not treat Rp amounts or mid-word underscores as emphasis", () => {
-    expect(formatForChannel("Rp25.000 untuk net_cash hari ini", "WHATSAPP")).toBe(
+    expect(formatForChannel("Rp25.000 untuk net_cash hari ini")).toBe(
       "Rp25.000 untuk net_cash hari ini",
     );
   });
-});
 
-describe("formatForChannel — Telegram", () => {
-  it("emits HTML tags", () => {
-    expect(formatForChannel("**Ringkasan**", "TELEGRAM")).toBe("<b>Ringkasan</b>");
-  });
-
-  it("escapes characters that would break HTML parsing", () => {
-    expect(formatForChannel("untung > rugi & aman", "TELEGRAM")).toBe(
-      "untung &gt; rugi &amp; aman",
-    );
-  });
-
-  it("escapes inside emphasis too", () => {
-    expect(formatForChannel("**a > b**", "TELEGRAM")).toBe("<b>a &gt; b</b>");
-  });
-});
-
-describe("formatForChannel — shared cleanup", () => {
   it("flattens Markdown tables into readable lines", () => {
     const table = ["| Kategori | Total |", "| --- | --- |", "| Makanan | Rp500.000 |"].join("\n");
-    expect(formatForChannel(table, "WHATSAPP")).toBe("Kategori — Total\nMakanan — Rp500.000");
+    expect(formatForChannel(table)).toBe("Kategori — Total\nMakanan — Rp500.000");
   });
 
   it("drops horizontal rules", () => {
-    expect(formatForChannel("Ringkasan\n---\nAnalisis", "WHATSAPP")).toBe("Ringkasan\nAnalisis");
+    expect(formatForChannel("Ringkasan\n---\nAnalisis")).toBe("Ringkasan\nAnalisis");
   });
 
   it("collapses excessive blank lines", () => {
-    expect(formatForChannel("a\n\n\n\nb", "WHATSAPP")).toBe("a\n\nb");
+    expect(formatForChannel("a\n\n\n\nb")).toBe("a\n\nb");
   });
 
   it("leaves plain text untouched", () => {
-    expect(formatForChannel("Pengeluaran tercatat Rp35.000", "WHATSAPP")).toBe(
+    expect(formatForChannel("Pengeluaran tercatat Rp35.000")).toBe(
       "Pengeluaran tercatat Rp35.000",
     );
   });

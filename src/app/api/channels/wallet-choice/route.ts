@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { phonesMatch } from "@/lib/phone";
 import { rateLimit } from "@/lib/rate-limit";
 import {
   cancelPendingTransaction,
@@ -12,27 +11,17 @@ import { recordedTransactionText } from "@/messaging/wallet-choice";
 import { appendHistory } from "@/ai/conversation-store";
 
 const schema = z.object({
-  channel: z.enum(["WHATSAPP", "TELEGRAM"]),
+  channel: z.literal("TELEGRAM"),
   externalId: z.string().min(1),
   pendingId: z.string().min(1),
   walletId: z.string().min(1).optional(),
   action: z.enum(["confirm", "cancel"]).default("confirm"),
 });
 
-async function findChannelLink(channel: "WHATSAPP" | "TELEGRAM", externalId: string) {
-  const exact = await prisma.channelLink.findUnique({
-    where: { channel_externalId: { channel, externalId } },
-  });
-  if (exact || channel !== "WHATSAPP") return exact;
-
-  const candidates = await prisma.channelLink.findMany({ where: { channel, isActive: true } });
-  return candidates.find((candidate) => phonesMatch(candidate.externalId, externalId)) ?? null;
-}
-
 /** Called by the chat workers when the user taps a wallet button. */
 export async function POST(request: Request) {
   const secret = request.headers.get("x-worker-secret");
-  if (!secret || secret !== process.env.WHATSAPP_WORKER_SECRET) {
+  if (!secret || secret !== process.env.WORKER_SECRET) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
@@ -43,7 +32,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "Rate limited" }, { status: 429 });
     }
 
-    const link = await findChannelLink(body.channel, body.externalId);
+    const link = await prisma.channelLink.findUnique({
+      where: { channel_externalId: { channel: body.channel, externalId: body.externalId } },
+    });
     if (!link || !link.isActive) {
       return NextResponse.json({ ok: false, error: "Akun belum terhubung." }, { status: 403 });
     }

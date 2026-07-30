@@ -1,6 +1,6 @@
 # Ledgerly — AI Finance Agent
 
-Self-hosted personal finance assistant. Catat pengeluaran lewat **chat** (Telegram / WhatsApp) atau dashboard web. Bukan SaaS publik — satu owner, akses tiap kunjungan lewat izin bot.
+Self-hosted personal finance assistant. Catat pengeluaran lewat **chat Telegram** atau dashboard web. Bukan SaaS publik — satu owner, akses tiap kunjungan lewat izin bot.
 
 > **Prinsip keandalan:** AI hanya memahami intent & memanggil tools. **Finance Engine** yang memvalidasi & menulis data. **PostgreSQL** adalah sumber kebenaran tunggal.
 
@@ -12,7 +12,6 @@ Self-hosted personal finance assistant. Catat pengeluaran lewat **chat** (Telegr
 |------|---------------------|
 | **Chat finance** | Kirim bahasa natural: *“beli makan 35 ribu”*, *“gaji masuk 7 juta”* → transaksi tersimpan |
 | **Telegram** | Bot Grammy: notifikasi akses, `/approve` / `/reject`, catat transaksi |
-| **WhatsApp** | Worker Baileys (scan QR sekali) — chat sama seperti Telegram |
 | **Dashboard** | Overview saldo, cashflow, health score |
 | **Transactions** | Riwayat, filter, edit transaksi |
 | **Analytics** | Tren pengeluaran / pemasukan |
@@ -36,7 +35,7 @@ Halaman penting:
 
 | Route | Fungsi |
 |-------|--------|
-| `/setup` | Setup pertama: nama owner + token Telegram / nomor WhatsApp |
+| `/setup` | Setup pertama: nama owner + token Telegram |
 | `/access` | Minta akses → tunggu `/approve KODE` di bot |
 | `/dashboard` | Overview keuangan |
 | `/dashboard/transactions` | Daftar transaksi |
@@ -51,7 +50,7 @@ Halaman penting:
 
 1. Buka URL instance → otomatis ke **`/setup`** jika belum dikonfigurasi  
 2. Isi nama owner  
-3. Hubungkan **Telegram** (bot token + chat ID) dan/atau **WhatsApp**  
+3. Hubungkan **Telegram** (bot token + chat ID)  
 4. Simpan → instance siap
 
 ### 2) Masuk dashboard
@@ -113,17 +112,17 @@ Panduan lengkap: **[DEPLOY.md](./DEPLOY.md)** · detail tambahan: **[SELF_HOST.m
 - **Web:** Next.js + TypeScript + Tailwind + Shadcn UI + Socket.io  
 - **Data:** Prisma + **Neon PostgreSQL** (produksi) / Neon atau Postgres lokal (dev)  
 - **AI:** OpenRouter (key user, dienkripsi at-rest — model bebas dipilih)  
-- **Messaging:** Grammy (Telegram) + Baileys (WhatsApp)  
+- **Messaging:** Grammy (Telegram)  
 - **Deploy:** Docker Compose + `install.sh` / `deploy.sh` / `update.sh` + Nginx SSL
 
 ```
-WhatsApp / Telegram / Web
-          ↓
-     AI Agent (tools)
-          ↓
-    Finance Engine
-          ↓
-   Neon PostgreSQL
+   Telegram / Web
+        ↓
+  AI Agent (tools)
+        ↓
+  Finance Engine
+        ↓
+ Neon PostgreSQL
 ```
 
 ---

@@ -8,7 +8,7 @@ export type VoiceTranscriptionRequest = {
   audioUrl?: string;
   audioBase64?: string;
   mimeType?: string;
-  channel: "WHATSAPP" | "TELEGRAM" | "WEB";
+  channel: "TELEGRAM" | "WEB";
 };
 
 export type VoiceTranscriptionResult = {

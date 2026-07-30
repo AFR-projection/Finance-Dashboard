@@ -1,6 +1,6 @@
 /**
  * Future-ready stubs for voice transcription and receipt OCR.
- * Keep interfaces stable so WhatsApp media handlers can plug in later.
+ * Keep interfaces stable so chat media handlers can plug in later.
  */
 
 export type TranscriptionResult = {

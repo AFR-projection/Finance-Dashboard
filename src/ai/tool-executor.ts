@@ -67,7 +67,7 @@ function resolveTransactionDate(raw: unknown, fallbackIsoDate: string): Date {
 export async function executeToolsParallel(
   userId: string,
   calls: Array<{ name: AgentToolName | string; args: Record<string, unknown> }>,
-  channel: "WHATSAPP" | "TELEGRAM" | "WEB" = "WEB",
+  channel: "TELEGRAM" | "WEB" = "WEB",
 ): Promise<Array<{ name: string; result: unknown }>> {
   const results = await Promise.allSettled(
     calls.map((call) =>
@@ -90,7 +90,7 @@ export async function executeTool(
   userId: string,
   name: AgentToolName | string,
   args: Record<string, unknown>,
-  channel: "WHATSAPP" | "TELEGRAM" | "WEB" = "WEB",
+  channel: "TELEGRAM" | "WEB" = "WEB",
 ): Promise<unknown> {
   try {
     switch (name) {

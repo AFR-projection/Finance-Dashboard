@@ -6,10 +6,8 @@ export type AppConfigView = {
   ownerName: string | null;
   ownerUserId: string | null;
   hasTelegram: boolean;
-  hasWhatsApp: boolean;
   telegramOwnerChatId: string | null;
-  whatsappOwnerPhone: string | null;
-  /** Siap dipakai: setup selesai + minimal 1 channel owner */
+  /** Siap dipakai: setup selesai + channel owner Telegram aktif */
   isReady: boolean;
 };
 
@@ -17,12 +15,9 @@ function computeReady(cfg: {
   setupCompleted: boolean;
   telegramBotToken: string | null;
   telegramOwnerChatId: string | null;
-  whatsappOwnerPhone: string | null;
 }) {
   if (!cfg.setupCompleted) return false;
-  const tg = Boolean(cfg.telegramBotToken && cfg.telegramOwnerChatId);
-  const wa = Boolean(cfg.whatsappOwnerPhone);
-  return tg || wa;
+  return Boolean(cfg.telegramBotToken && cfg.telegramOwnerChatId);
 }
 
 export async function getAppConfig(): Promise<AppConfigView> {
@@ -37,9 +32,7 @@ export async function getAppConfig(): Promise<AppConfigView> {
     ownerName: row.ownerName,
     ownerUserId: row.ownerUserId,
     hasTelegram: Boolean(row.telegramBotToken && row.telegramOwnerChatId),
-    hasWhatsApp: Boolean(row.whatsappOwnerPhone),
     telegramOwnerChatId: row.telegramOwnerChatId,
-    whatsappOwnerPhone: row.whatsappOwnerPhone,
     isReady: computeReady(row),
   };
 }
@@ -64,14 +57,12 @@ export type BootstrapInput = {
   ownerName: string;
   telegramBotToken?: string;
   telegramOwnerChatId?: string;
-  whatsappOwnerPhone?: string;
 };
 
 export async function bootstrapApp(input: BootstrapInput) {
   const tgOk = Boolean(input.telegramBotToken?.trim() && input.telegramOwnerChatId?.trim());
-  const waOk = Boolean(input.whatsappOwnerPhone?.trim());
-  if (!tgOk && !waOk) {
-    throw new Error("Minimal satu channel: Telegram (token + chat ID) atau WhatsApp (nomor owner).");
+  if (!tgOk) {
+    throw new Error("Telegram wajib: isi bot token dan chat ID owner.");
   }
 
   const existing = await getAppConfigRaw();
@@ -92,8 +83,6 @@ export async function bootstrapApp(input: BootstrapInput) {
   await FinanceEngine.ensureUserSettings(user.id);
   await FinanceEngine.ensureDefaultCategories(user.id);
 
-  const phone = input.whatsappOwnerPhone?.replace(/\D/g, "") || null;
-
   await prisma.appConfig.update({
     where: { id: "singleton" },
     data: {
@@ -101,13 +90,12 @@ export async function bootstrapApp(input: BootstrapInput) {
       ownerName: input.ownerName,
       telegramBotToken: input.telegramBotToken?.trim() || null,
       telegramOwnerChatId: input.telegramOwnerChatId?.trim() || null,
-      whatsappOwnerPhone: phone,
       setupCompleted: true,
     },
   });
 
-  // Auto-link owner channel IDs
-  if (tgOk && input.telegramOwnerChatId) {
+  // Auto-link owner channel ID
+  if (input.telegramOwnerChatId) {
     await prisma.channelLink.upsert({
       where: {
         channel_externalId: {
@@ -126,22 +114,6 @@ export async function bootstrapApp(input: BootstrapInput) {
     });
   }
 
-  if (waOk && phone) {
-    await prisma.channelLink.upsert({
-      where: {
-        channel_externalId: { channel: "WHATSAPP", externalId: phone },
-      },
-      update: { userId: user.id, isActive: true, displayName: "Owner" },
-      create: {
-        userId: user.id,
-        channel: "WHATSAPP",
-        externalId: phone,
-        displayName: "Owner",
-        isActive: true,
-      },
-    });
-  }
-
   return getAppConfig();
 }
 
@@ -149,7 +121,6 @@ export async function updateOwnerBotConfig(input: {
   ownerName?: string;
   telegramBotToken?: string | null;
   telegramOwnerChatId?: string | null;
-  whatsappOwnerPhone?: string | null;
   clearTelegramToken?: boolean;
 }) {
   const cfg = await getAppConfigRaw();
@@ -169,15 +140,8 @@ export async function updateOwnerBotConfig(input: {
       ? input.telegramOwnerChatId?.trim() || null
       : cfg.telegramOwnerChatId;
 
-  const nextPhone =
-    input.whatsappOwnerPhone !== undefined
-      ? input.whatsappOwnerPhone?.replace(/\D/g, "") || null
-      : cfg.whatsappOwnerPhone;
-
-  const tgOk = Boolean(nextToken && nextChat);
-  const waOk = Boolean(nextPhone);
-  if (!tgOk && !waOk) {
-    throw new Error("Minimal satu channel owner harus aktif.");
+  if (!nextToken || !nextChat) {
+    throw new Error("Telegram owner harus tetap aktif: token dan chat ID wajib ada.");
   }
 
   await prisma.appConfig.update({
@@ -186,31 +150,39 @@ export async function updateOwnerBotConfig(input: {
       ownerName: input.ownerName?.trim() || cfg.ownerName,
       telegramBotToken: nextToken,
       telegramOwnerChatId: nextChat,
-      whatsappOwnerPhone: nextPhone,
     },
   });
 
   return getAppConfig();
 }
 
+/**
+ * Telegram is the only owner channel, so a missing token means nobody was
+ * reached. Callers must show the code on screen instead of assuming delivery.
+ */
 export async function notifyOwner(
   message: string,
   options: { approveCode?: string } = {},
-) {
+): Promise<{ delivered: boolean }> {
   const cfg = await getAppConfigRaw();
-  if (cfg.telegramBotToken && cfg.telegramOwnerChatId) {
-    const reply_markup = options.approveCode
-      ? {
-          inline_keyboard: [
-            [
-              { text: "✅ Izinkan", callback_data: `access:approve:${options.approveCode}` },
-              { text: "⛔ Tolak", callback_data: `access:reject:${options.approveCode}` },
-            ],
-          ],
-        }
-      : undefined;
+  if (!cfg.telegramBotToken || !cfg.telegramOwnerChatId) {
+    return { delivered: false };
+  }
 
-    await fetch(`https://api.telegram.org/bot${cfg.telegramBotToken}/sendMessage`, {
+  const reply_markup = options.approveCode
+    ? {
+        inline_keyboard: [
+          [
+            { text: "✅ Izinkan", callback_data: `access:approve:${options.approveCode}` },
+            { text: "⛔ Tolak", callback_data: `access:reject:${options.approveCode}` },
+          ],
+        ],
+      }
+    : undefined;
+
+  const response = await fetch(
+    `https://api.telegram.org/bot${cfg.telegramBotToken}/sendMessage`,
+    {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -218,9 +190,8 @@ export async function notifyOwner(
         text: message,
         ...(reply_markup ? { reply_markup } : {}),
       }),
-    });
-    return { channel: "TELEGRAM" as const };
-  }
-  // WhatsApp: owner will see code on screen / reply approve on WA bot
-  return { channel: "WHATSAPP" as const };
+    },
+  );
+
+  return { delivered: response.ok };
 }

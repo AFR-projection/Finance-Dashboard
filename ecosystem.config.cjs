@@ -1,6 +1,5 @@
 /**
  * PM2 ecosystem — loads .env automatically so secrets & DB URL are correct.
- * WhatsApp session persists in WHATSAPP_AUTH_DIR (never deleted by redeploy).
  */
 /* eslint-disable @typescript-eslint/no-require-imports */
 const fs = require("fs");
@@ -30,17 +29,12 @@ function loadEnvFile() {
 
 const fileEnv = loadEnvFile();
 const port = fileEnv.APP_PORT || process.env.APP_PORT || "3000";
-const waAuth =
-  fileEnv.WHATSAPP_AUTH_DIR ||
-  process.env.WHATSAPP_AUTH_DIR ||
-  path.join(__dirname, "workers", ".wa-auth");
 
 const sharedEnv = {
   ...fileEnv,
   NODE_ENV: "production",
   PORT: port,
   HOSTNAME: fileEnv.HOSTNAME || "0.0.0.0",
-  WHATSAPP_AUTH_DIR: waAuth,
 };
 
 const apps = [
@@ -59,24 +53,6 @@ const apps = [
     env: { ...sharedEnv, TELEGRAM_EMBEDDED: "0" },
     error_file: "logs/pm2-web-error.log",
     out_file: "logs/pm2-web-out.log",
-    merge_logs: true,
-    time: true,
-  },
-  {
-    name: "ledgerly-whatsapp",
-    script: "workers/whatsapp/index.ts",
-    interpreter: "node",
-    interpreterArgs: "--import tsx",
-    cwd: __dirname,
-    instances: 1,
-    exec_mode: "fork",
-    watch: false,
-    autorestart: true,
-    max_restarts: 100,
-    restart_delay: 5000,
-    env: sharedEnv,
-    error_file: "logs/pm2-whatsapp-error.log",
-    out_file: "logs/pm2-whatsapp-out.log",
     merge_logs: true,
     time: true,
   },

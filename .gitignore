@@ -45,9 +45,6 @@ yarn-error.log*
 /.env-backups/
 .deployed
 
-# whatsapp baileys session
-workers/.wa-auth/
-
 # vercel
 .vercel
 

@@ -47,8 +47,8 @@ COPY --from=builder /app/next.config.ts ./
 COPY --from=builder /app/server.ts ./
 COPY --from=builder /app/ecosystem.config.cjs ./
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN mkdir -p /app/logs /app/.next/cache /data/wa-auth \
-  && chown -R node:node /app /data/wa-auth \
+RUN mkdir -p /app/logs /app/.next/cache \
+  && chown -R node:node /app \
   && chmod +x /entrypoint.sh
 
 EXPOSE 3000

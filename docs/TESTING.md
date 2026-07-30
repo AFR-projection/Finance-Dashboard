@@ -61,13 +61,6 @@ Assert:
 3. Send `bayar listrik 300 ribu`
 4. Confirm reply + DB row with `channel=TELEGRAM`
 
-### WhatsApp
-
-1. Start `npm run worker:whatsapp`, scan QR
-2. Pair with `link KODE` (or manual phone link)
-3. Send natural language expense
-4. Confirm reply path via ingress API
-
 ## Reliability invariants
 
 1. No Prisma writes inside `src/ai/**` except read for AI settings / memory helpers called from tools/engine.

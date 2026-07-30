@@ -22,7 +22,6 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/api/setup") ||
     pathname.startsWith("/api/access") ||
     pathname.startsWith("/api/channels/ingress") ||
-    pathname.startsWith("/api/channels/whatsapp-session") ||
     pathname.startsWith("/api/auth/login-confirm") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon")

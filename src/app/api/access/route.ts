@@ -73,7 +73,7 @@ export async function POST(request: Request) {
     ip,
     fingerprintId: body.fingerprintId,
     country: geo.country,
-    reason: notified.channel,
+    reason: notified.delivered ? "TELEGRAM" : "UNDELIVERED",
   });
 
   return Response.json({
@@ -81,14 +81,13 @@ export async function POST(request: Request) {
     data: {
       sessionId,
       // Telegram gets tap-to-approve buttons, so the code never needs to reach
-      // the browser. WhatsApp has no buttons — the owner must read it and reply.
-      confirmCode: notified.channel === "WHATSAPP" ? confirmCode : null,
+      // the browser. It is only surfaced when the notification failed to send.
+      confirmCode: notified.delivered ? null : confirmCode,
       ttlSeconds: accessTtlSeconds(),
-      notifiedVia: notified.channel,
-      message:
-        notified.channel === "TELEGRAM"
-          ? "Notifikasi terkirim ke Telegram owner. Tekan Izinkan di bot…"
-          : "Balas di WhatsApp bot: approve KODE (atau reject KODE).",
+      notifiedVia: notified.delivered ? "TELEGRAM" : null,
+      message: notified.delivered
+        ? "Notifikasi terkirim ke Telegram owner. Tekan Izinkan di bot…"
+        : "Bot Telegram belum terkonfigurasi. Setujui memakai kode di layar ini.",
     },
   });
 }

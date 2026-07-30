@@ -9,16 +9,14 @@ export async function GET() {
     isReady: cfg.isReady,
     // never expose tokens
     hasTelegram: cfg.hasTelegram,
-    hasWhatsApp: cfg.hasWhatsApp,
     ownerName: cfg.ownerName,
   });
 }
 
 const schema = z.object({
   ownerName: z.string().min(2).max(80),
-  telegramBotToken: z.string().min(20).optional().or(z.literal("")),
-  telegramOwnerChatId: z.string().min(3).optional().or(z.literal("")),
-  whatsappOwnerPhone: z.string().min(8).optional().or(z.literal("")),
+  telegramBotToken: z.string().min(20),
+  telegramOwnerChatId: z.string().min(3),
 });
 
 export async function POST(request: Request) {
@@ -34,9 +32,8 @@ export async function POST(request: Request) {
     const body = schema.parse(await request.json());
     const result = await bootstrapApp({
       ownerName: body.ownerName,
-      telegramBotToken: body.telegramBotToken || undefined,
-      telegramOwnerChatId: body.telegramOwnerChatId || undefined,
-      whatsappOwnerPhone: body.whatsappOwnerPhone || undefined,
+      telegramBotToken: body.telegramBotToken,
+      telegramOwnerChatId: body.telegramOwnerChatId,
     });
 
     return jsonOk(result);
