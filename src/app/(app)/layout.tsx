@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { MobileNav } from "@/components/layout/mobile-nav";
+import { InstallPrompt } from "@/components/pwa/install-prompt";
 import { getAccessSession, touchAccessSession } from "@/lib/access-session";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           {children}
         </div>
       </main>
+      <InstallPrompt />
     </div>
   );
 }

@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, MoreHorizontal, Sparkles } from "lucide-react";
+import { MoreHorizontal, Sparkles } from "lucide-react";
+import { NotificationBell } from "@/components/pwa/notification-bell";
 import {
   Sheet,
   SheetContent,
@@ -29,20 +30,14 @@ export function MobileNav() {
 
   return (
     <>
-      <header className="sticky top-0 z-30 -mx-4 mb-4 flex h-15 items-center justify-between border-b border-border/50 bg-background/85 px-4 backdrop-blur-xl lg:hidden">
+      <header className="mobile-safe-top sticky top-0 z-30 -mx-4 mb-4 flex h-15 items-center justify-between border-b border-border/50 bg-background/85 px-4 backdrop-blur-xl lg:hidden">
         <Link href="/dashboard" className="flex items-center gap-2.5">
           <span className="grid size-8 place-items-center rounded-xl bg-primary text-primary-foreground">
             <BrandIcon className="size-4" />
           </span>
           <span className="text-[15px] font-bold tracking-[-0.03em]">Ledgerly</span>
         </Link>
-        <button
-          type="button"
-          className="grid size-9 place-items-center rounded-xl border border-border/70 bg-card text-muted-foreground"
-          aria-label="Notifikasi"
-        >
-          <Bell className="size-4" />
-        </button>
+        <NotificationBell />
       </header>
 
       <nav className="mobile-safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-white/60 bg-background/90 px-2 pt-1.5 shadow-[0_-12px_40px_-24px_rgba(15,35,30,.35)] backdrop-blur-2xl lg:hidden">

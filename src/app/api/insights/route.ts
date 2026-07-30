@@ -9,7 +9,28 @@ function periodKeyNow() {
 export async function GET(request: Request) {
   return withApiGuard(request, async (userId) => {
     const key = periodKeyNow();
-    let stored = await FinanceEngine.listAiInsights(userId, key);
+
+    // The heartbeat worker writes daily:/weekly: insights from a real LLM pass.
+    // Those are the primary source; the rules below only cover a fresh install
+    // where the worker has not run a single cycle yet.
+    const recent = await FinanceEngine.listAiInsights(userId);
+    const fromHeartbeat = recent.filter(
+      (i) => i.periodKey.startsWith("daily:") || i.periodKey.startsWith("weekly:"),
+    );
+    if (fromHeartbeat.length > 0) {
+      return jsonOk({
+        periodKey: fromHeartbeat[0].periodKey,
+        items: fromHeartbeat.slice(0, 8).map((i) => ({
+          id: i.id,
+          title: i.title,
+          body: i.body,
+          severity: i.severity,
+          createdAt: i.createdAt,
+        })),
+      });
+    }
+
+    let stored = recent.filter((i) => i.periodKey === key);
 
     if (stored.length === 0) {
       const overview = await FinanceEngine.getOverview(userId);

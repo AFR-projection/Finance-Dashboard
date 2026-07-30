@@ -1,6 +1,8 @@
 import { toolsForOpenAICompatible, type AgentToolName } from "./tools";
 import { executeToolsParallel } from "./tool-executor";
 import { appendHistory, loadHistory } from "./conversation-store";
+import { rankMemories } from "./memory-retrieval";
+import { FinanceEngine } from "@/finance-engine";
 import { prisma } from "@/lib/db";
 import { isWalletPromptResult } from "@/messaging/wallet-prompt";
 import type { WalletPrompt } from "@/messaging/wallet-choice";
@@ -33,7 +35,9 @@ export type AgentMessage = {
   content: string;
 };
 
-const MAX_AGENT_ROUNDS = 4;
+const MAX_AGENT_ROUNDS = 6;
+/** Ceiling on total tool calls per request so a looping model cannot run up cost. */
+const MAX_TOOL_CALLS = 14;
 const ALWAYS_MUTATING_TOOLS = new Set<AgentToolName>([
   "createTransaction",
   "updateTransaction",
@@ -90,19 +94,34 @@ function nowInTimezone(timezone: string): { isoDate: string; time: string; dayNa
   };
 }
 
-async function loadUserContext(userId: string): Promise<string> {
+function formatAmount(value: number, currency: string): string {
+  return currency === "IDR"
+    ? `Rp${Math.round(value).toLocaleString("id-ID")}`
+    : `${currency} ${value.toFixed(2)}`;
+}
+
+async function loadUserContext(userId: string, message: string): Promise<string> {
   try {
-    const [memories, settings, recentTxs, goalCount] = await Promise.all([
-      prisma.aiMemory.findMany({ where: { userId }, orderBy: { updatedAt: "desc" }, take: 20 }),
-      prisma.userSettings.findUnique({ where: { userId } }),
-      prisma.transaction.findMany({
-        where: { userId },
-        orderBy: { transactionDate: "desc" },
-        take: 5,
-        include: { category: true },
-      }),
-      prisma.financialGoal.count({ where: { userId } }),
-    ]);
+    const [memories, settings, recentTxs, goals, wallets, budgetReport, prediction, insights] =
+      await Promise.all([
+        prisma.aiMemory.findMany({ where: { userId }, orderBy: { updatedAt: "desc" }, take: 60 }),
+        prisma.userSettings.findUnique({ where: { userId } }),
+        prisma.transaction.findMany({
+          where: { userId },
+          orderBy: { transactionDate: "desc" },
+          take: 12,
+          include: { category: true, wallet: true },
+        }),
+        FinanceEngine.listGoals(userId).catch(() => []),
+        FinanceEngine.listWallets(userId).catch(() => []),
+        FinanceEngine.analyzeBudget(userId).catch(() => null),
+        FinanceEngine.predictMonthEnd(userId).catch(() => null),
+        prisma.aiInsight.findMany({
+          where: { userId },
+          orderBy: { createdAt: "desc" },
+          take: 3,
+        }),
+      ]);
 
     const currency = settings?.currency ?? "IDR";
     const timezone = settings?.timezone ?? "Asia/Jakarta";
@@ -112,20 +131,68 @@ async function loadUserContext(userId: string): Promise<string> {
     lines.push(`Timezone: ${timezone}`);
     lines.push(`Currency: ${currency}`);
     lines.push(`Current local time: ${tzTime.dayNameId}, ${tzTime.isoDate} ${tzTime.time}`);
-    lines.push(`Active goals: ${goalCount}`);
 
-    if (memories.length > 0) {
-      lines.push("---");
-      for (const m of memories) lines.push(`- ${m.key}: ${m.content}`);
+    if (wallets.length > 0) {
+      lines.push("--- SALDO REKENING (ledger, otoritatif) ---");
+      for (const w of wallets) {
+        lines.push(
+          `- ${w.name}: ${formatAmount(w.balance, w.currency)}${w.isDefault ? " (default)" : ""}`,
+        );
+      }
+    }
+
+    if (budgetReport && budgetReport.budgets.length > 0) {
+      lines.push(`--- BUDGET ${budgetReport.month}/${budgetReport.year} ---`);
+      for (const b of budgetReport.budgets) {
+        lines.push(
+          `- ${b.categoryName}: ${formatAmount(b.spent, budgetReport.currency)} / ${formatAmount(b.limit, budgetReport.currency)} (${b.percentUsed}%, ${b.status})`,
+        );
+      }
+    }
+
+    if (prediction) {
+      lines.push("--- PROYEKSI BULAN INI ---");
+      lines.push(
+        `Pemasukan ${formatAmount(prediction.currentIncome, currency)}, pengeluaran ${formatAmount(prediction.currentExpense, currency)} (hari ${prediction.daysElapsed}/${prediction.daysInMonth})`,
+      );
+      lines.push(
+        `Proyeksi pengeluaran akhir bulan ${formatAmount(prediction.projectedExpense, currency)}, proyeksi arus kas bersih ${formatAmount(prediction.projectedBalance, currency)}${prediction.riskOverspend ? " — RISIKO OVERSPEND" : ""}`,
+      );
+    }
+
+    if (goals.length > 0) {
+      lines.push("--- TARGET KEUANGAN ---");
+      for (const g of goals) {
+        const target = Number(g.targetAmount);
+        const current = Number(g.currentAmount);
+        const pct = target > 0 ? Math.round((current / target) * 100) : 0;
+        const deadline = g.deadline ? ` • tenggat ${g.deadline.toISOString().slice(0, 10)}` : "";
+        lines.push(
+          `- ${g.goalName}: ${formatAmount(current, currency)} / ${formatAmount(target, currency)} (${pct}%)${deadline}`,
+        );
+      }
+    }
+
+    if (insights.length > 0) {
+      lines.push("--- INSIGHT PROAKTIF YANG SUDAH DIKIRIM (jangan diulang) ---");
+      for (const i of insights) lines.push(`- ${i.title}: ${i.body}`);
+    }
+
+    const ranked = rankMemories(memories, message);
+    if (ranked.length > 0) {
+      lines.push("--- PREFERENSI & CATATAN ---");
+      for (const m of ranked) lines.push(`- ${m.key}: ${m.content}`);
     }
 
     if (recentTxs.length > 0) {
-      lines.push("---");
+      lines.push("--- TRANSAKSI TERAKHIR ---");
       for (const t of recentTxs) {
-        const amt = currency === "IDR"
-          ? `Rp${Number(t.amount).toLocaleString("id-ID")}`
-          : `${currency} ${Number(t.amount).toFixed(2)}`;
-        lines.push(`${t.type === "INCOME" ? "+" : "-"} ${t.category?.name ?? "?"}: ${amt} — ${t.description}`);
+        const walletCurrency = t.wallet?.currency ?? currency;
+        const amt = formatAmount(Number(t.amount), walletCurrency);
+        const date = t.transactionDate.toISOString().slice(0, 10);
+        lines.push(
+          `${t.type === "INCOME" ? "+" : "-"} ${date} ${t.category?.name ?? "?"}: ${amt}${t.wallet ? ` @${t.wallet.name}` : ""} — ${t.description}`,
+        );
       }
     }
 
@@ -167,7 +234,7 @@ async function runOpenRouter(params: {
   channel: "TELEGRAM" | "WEB";
   history: AgentMessage[];
 }): Promise<AgentReply> {
-  const userContext = await loadUserContext(params.userId);
+  const userContext = await loadUserContext(params.userId, params.message);
   const systemPrompt = buildFinanceAgentSystemPrompt({
     channel: params.channel,
     userContext,
@@ -217,6 +284,9 @@ async function runOpenRouter(params: {
       { role: "user", content: params.message },
     ];
     let forceRequiredTool = false;
+    // Identical (tool, args) pairs mean the model is spinning rather than making
+    // progress, and re-running a write would double-record the transaction.
+    const seenCalls = new Set<string>();
 
     try {
       for (let round = 0; round < MAX_AGENT_ROUNDS; round++) {
@@ -260,19 +330,48 @@ async function runOpenRouter(params: {
           forceRequiredTool = false;
           messages.push({ role: "assistant", content: msg.content, tool_calls: msg.tool_calls });
 
-          const toolCalls = msg.tool_calls.map((call) => {
-            toolsUsed.push(call.function.name);
+          const planned = msg.tool_calls.map((call) => {
             let args: Record<string, unknown> = {};
             try { args = JSON.parse(call.function.arguments || "{}"); } catch { args = {}; }
             const name = call.function.name as AgentToolName;
-            if (isMutatingToolCall(name, args)) writeAttempted = true;
-            return { name, args: { ...args, rawInput: params.message } };
+            const signature = `${name}:${JSON.stringify(args)}`;
+            const blocked = seenCalls.has(signature)
+              ? "Panggilan tool ini identik dengan yang sudah dijalankan di percakapan ini. Hasilnya tidak berubah — jangan ulangi, jawab dari hasil sebelumnya."
+              : toolsUsed.length >= MAX_TOOL_CALLS
+                ? "Batas jumlah tool per permintaan tercapai. Jawab sekarang dari data yang sudah ada."
+                : null;
+            if (!blocked) {
+              seenCalls.add(signature);
+              toolsUsed.push(name);
+              if (isMutatingToolCall(name, args)) writeAttempted = true;
+            }
+            return { id: call.id, name, args: { ...args, rawInput: params.message }, blocked };
           });
 
-          const results = await executeToolsParallel(params.userId, toolCalls, params.channel);
+          const executable = planned.filter((call) => !call.blocked);
+          const executed = await executeToolsParallel(
+            params.userId,
+            executable.map((call) => ({ name: call.name, args: call.args })),
+            params.channel,
+          );
+          const resultBySignature = new Map<string, unknown>();
+          executable.forEach((call, index) => {
+            resultBySignature.set(call.id, executed[index]?.result);
+          });
+
           const clientMessages: string[] = [];
-          for (let i = 0; i < results.length; i++) {
-            const result = results[i].result;
+          let executedCount = 0;
+          for (const call of planned) {
+            if (call.blocked) {
+              messages.push({
+                role: "tool",
+                tool_call_id: call.id,
+                content: JSON.stringify({ error: call.blocked }),
+              });
+              continue;
+            }
+            executedCount += 1;
+            const result = resultBySignature.get(call.id);
             data.push(result);
             const mutation = getVerifiedMutation(result);
             if (mutation) verifiedWrite = true;
@@ -284,7 +383,7 @@ async function runOpenRouter(params: {
                 writeReceipts.push({ walletName: mutation.walletName, receipt: clientMessage });
               }
             }
-            messages.push({ role: "tool", tool_call_id: msg.tool_calls[i].id, content: JSON.stringify(result) });
+            messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
           }
           // This is a workflow state owned by the tool, not prose for the model
           // to reinterpret. Stop immediately and let the channel render the
@@ -296,8 +395,10 @@ async function runOpenRouter(params: {
           // from the tool. Return them directly instead of paying for another
           // model round that could paraphrase the saved facts incorrectly.
           if (
-            toolCalls.every((call) => call.name === "createTransaction") &&
-            clientMessages.length === toolCalls.length
+            executedCount > 0 &&
+            executable.every((call) => call.name === "createTransaction") &&
+            planned.length === executable.length &&
+            clientMessages.length === executable.length
           ) {
             return { text: clientMessages.join("\n\n"), toolsUsed, data };
           }

@@ -36,4 +36,23 @@ describe("buildFinanceAgentSystemPrompt", () => {
     expect(prompt).toContain("CHANNEL: WEB");
     expect(prompt).toContain("short headings and bullets");
   });
+
+  it("tells the agent to answer from pre-loaded context instead of re-reading it", () => {
+    const prompt = buildFinanceAgentSystemPrompt({ channel: "WEB", userContext });
+
+    expect(prompt).toContain("do not spend a tool call re-reading the same facts");
+    // A saldo question must stay tool-backed even though balances are pre-loaded,
+    // otherwise the grounding guard in agent.ts has nothing to verify against.
+    expect(prompt).toContain("still requires getFinancialSnapshot");
+    expect(prompt).toContain("never repeat it as if it were new");
+  });
+
+  it("keeps simulations and budget proposals labelled as non-facts", () => {
+    const prompt = buildFinanceAgentSystemPrompt({ channel: "WEB", userContext });
+
+    expect(prompt).toContain("simulateScenario");
+    expect(prompt).toContain("planBudgetFromHistory");
+    expect(prompt).toContain("It only proposes; nothing is saved");
+    expect(prompt).toContain("Never present a simulation or proposal as a recorded fact");
+  });
 });

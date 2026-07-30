@@ -222,6 +222,48 @@ export const agentTools = [
       required: ["action"],
     },
   },
+  {
+    name: "simulateScenario",
+    description:
+      "What-if projection from real history. Use for 'kalau X dipotong Y%, setahun jadi berapa?' or 'goal saya maju berapa lama?'. Returns estimates computed from the user's own 3-month averages — always present the result as an estimate, never as a recorded fact.",
+    parameters: {
+      type: "object",
+      properties: {
+        category: {
+          type: "string",
+          description: "Category to adjust, e.g. Food. Omit to simulate total expenses.",
+        },
+        changePercent: {
+          type: "number",
+          description: "Spend change: -30 means cut 30%, +20 means increase 20%.",
+        },
+        monthlyAmount: {
+          type: "number",
+          description: "Absolute monthly change instead of a percentage. Negative means saving.",
+        },
+        horizonMonths: { type: "number", description: "Projection horizon in months (default 12)" },
+        goalName: {
+          type: "string",
+          description: "Goal to re-time with the freed-up money. Omit to skip goal impact.",
+        },
+      },
+    },
+  },
+  {
+    name: "planBudgetFromHistory",
+    description:
+      "Propose monthly budget limits per category from the user's 3-month averages. Returns proposals only — nothing is saved. Ask the user first, then write each accepted limit with manageBudget.",
+    parameters: {
+      type: "object",
+      properties: {
+        targetSavingPercent: {
+          type: "number",
+          description: "How much to trim from historical averages, e.g. 10 for a 10% cut (default 10)",
+        },
+        months: { type: "number", description: "History window in months (default 3)" },
+      },
+    },
+  },
 ] as const;
 
 export type AgentToolName = (typeof agentTools)[number]["name"];

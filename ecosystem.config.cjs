@@ -79,4 +79,25 @@ apps.push({
   time: true,
 });
 
+// Scheduling lives in its own process: an interval inside the web app would
+// fire twice the moment a second instance exists, and restart on every deploy.
+apps.push({
+  name: "ledgerly-heartbeat",
+  script: "workers/heartbeat/index.ts",
+  interpreter: "node",
+  interpreterArgs: "--import tsx",
+  cwd: __dirname,
+  instances: 1,
+  exec_mode: "fork",
+  watch: false,
+  autorestart: true,
+  max_restarts: 50,
+  restart_delay: 5000,
+  env: sharedEnv,
+  error_file: "logs/pm2-heartbeat-error.log",
+  out_file: "logs/pm2-heartbeat-out.log",
+  merge_logs: true,
+  time: true,
+});
+
 module.exports = { apps };

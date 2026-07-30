@@ -19,6 +19,9 @@ export default function SettingsPage() {
   const [telegramOwnerChatId, setTelegramOwnerChatId] = useState("");
   const [hasTelegram, setHasTelegram] = useState(false);
 
+  const [heartbeatEnabled, setHeartbeatEnabled] = useState(true);
+  const [heartbeatHour, setHeartbeatHour] = useState(7);
+
   useEffect(() => {
     fetch("/api/settings")
       .then((r) => r.json())
@@ -28,6 +31,10 @@ export default function SettingsPage() {
         setCurrency(j.data.currency);
         setTimezone(j.data.timezone);
         setHasKey(j.data.hasApiKey);
+        if (typeof j.data.heartbeatEnabled === "boolean") {
+          setHeartbeatEnabled(j.data.heartbeatEnabled);
+        }
+        if (typeof j.data.heartbeatHour === "number") setHeartbeatHour(j.data.heartbeatHour);
         if (j.data.owner) {
           setOwnerName(j.data.owner.ownerName || "");
           setTelegramOwnerChatId(j.data.owner.telegramOwnerChatId || "");
@@ -54,6 +61,22 @@ export default function SettingsPage() {
       setApiKey("");
       setHasKey(true);
     } else toast.error("Gagal simpan AI settings");
+  }
+
+  async function saveHeartbeat(e: FormEvent) {
+    e.preventDefault();
+    const res = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        section: "ai",
+        aiModel: model,
+        heartbeatEnabled,
+        heartbeatHour,
+      }),
+    });
+    if (res.ok) toast.success("Jadwal heartbeat tersimpan");
+    else toast.error("Gagal simpan jadwal heartbeat");
   }
 
   async function saveOwner(e: FormEvent) {
@@ -126,6 +149,45 @@ export default function SettingsPage() {
               </div>
             </div>
             <Button type="submit">Simpan AI</Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/60 bg-white/70 shadow-none">
+        <CardHeader>
+          <CardTitle>Heartbeat</CardTitle>
+          <CardDescription>
+            Ledgerly menganalisis keuanganmu tiap pagi dan mengirim rekap tiap Senin. Kalau tidak
+            ada yang penting, ia diam.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={saveHeartbeat} className="space-y-4">
+            <label className="flex min-h-11 cursor-pointer items-center justify-between gap-4 rounded-xl border border-border/60 px-3 py-2">
+              <span className="text-sm font-medium">Aktifkan heartbeat</span>
+              <input
+                type="checkbox"
+                checked={heartbeatEnabled}
+                onChange={(e) => setHeartbeatEnabled(e.target.checked)}
+                className="size-5 accent-primary"
+              />
+            </label>
+            <div className="space-y-2">
+              <Label htmlFor="heartbeat-hour">Jam kirim (waktu {timezone})</Label>
+              <Input
+                id="heartbeat-hour"
+                type="number"
+                min={0}
+                max={23}
+                value={heartbeatHour}
+                onChange={(e) => setHeartbeatHour(Number(e.target.value))}
+                disabled={!heartbeatEnabled}
+              />
+              <p className="text-xs text-muted-foreground">
+                0–23. Senin dikirim rekap mingguan menggantikan brief harian.
+              </p>
+            </div>
+            <Button type="submit">Simpan heartbeat</Button>
           </form>
         </CardContent>
       </Card>

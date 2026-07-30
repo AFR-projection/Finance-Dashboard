@@ -52,6 +52,19 @@ async function resolveUserTimezone(userId: string): Promise<string> {
   }
 }
 
+async function resolveUserCurrency(userId: string): Promise<string> {
+  try {
+    const { prisma } = await import("@/lib/db");
+    const settings = await prisma.userSettings.findUnique({
+      where: { userId },
+      select: { currency: true },
+    });
+    return settings?.currency || "IDR";
+  } catch {
+    return "IDR";
+  }
+}
+
 // Anchor ke tengah hari UTC supaya tanggal tidak bergeser saat dirender ulang di timezone user.
 function resolveTransactionDate(raw: unknown, fallbackIsoDate: string): Date {
   const candidate = typeof raw === "string" ? raw.trim().slice(0, 10) : "";
@@ -607,6 +620,123 @@ export async function executeTool(
           return FinanceEngine.deleteWallet(userId, id);
         }
         return { error: `Unknown action: ${action}. Use list, create, update, or delete.` };
+      }
+
+      case "simulateScenario": {
+        const horizonMonths = Math.max(1, Math.min(120, Number(args.horizonMonths ?? 12)));
+        const windowMonths = 3;
+        const [txs, goals, settings] = await Promise.all([
+          FinanceEngine.getTransactions(userId, { from: daysAgo(windowMonths * 30), limit: 1000 }),
+          args.goalName ? FinanceEngine.listGoals(userId) : Promise.resolve([]),
+          resolveUserCurrency(userId),
+        ]);
+        const items = txs.items as unknown as Array<{
+          amount: number; type: string; category: { name: string } | null;
+        }>;
+
+        const targetCategory = args.category ? String(args.category).toLowerCase() : null;
+        let baseTotal = 0;
+        for (const tx of items) {
+          if (tx.type !== "EXPENSE") continue;
+          const catName = (tx.category?.name ?? "Other").toLowerCase();
+          if (targetCategory && catName !== targetCategory) continue;
+          baseTotal += Number(tx.amount);
+        }
+
+        if (baseTotal === 0) {
+          return {
+            error: targetCategory
+              ? `Tidak ada pengeluaran tercatat untuk kategori "${args.category}" dalam ${windowMonths} bulan terakhir, jadi simulasi tidak punya dasar angka.`
+              : `Tidak ada pengeluaran tercatat dalam ${windowMonths} bulan terakhir, jadi simulasi tidak punya dasar angka.`,
+          };
+        }
+
+        const baselineMonthly = Math.round(baseTotal / windowMonths);
+        // An absolute figure from the user beats a percentage guess.
+        const monthlyDelta =
+          args.monthlyAmount != null
+            ? Math.round(Number(args.monthlyAmount))
+            : Math.round((baselineMonthly * Number(args.changePercent ?? 0)) / 100);
+        const newMonthly = Math.max(0, baselineMonthly + monthlyDelta);
+        const monthlySaving = baselineMonthly - newMonthly;
+
+        const goalImpact = (() => {
+          if (!args.goalName || monthlySaving <= 0) return null;
+          const wanted = String(args.goalName).toLowerCase();
+          const goal = goals.find((g) => g.goalName.toLowerCase().includes(wanted));
+          if (!goal) return { error: `Goal "${args.goalName}" tidak ditemukan.` };
+          const remaining = Number(goal.targetAmount) - Number(goal.currentAmount);
+          if (remaining <= 0) return { goalName: goal.goalName, note: "Goal ini sudah tercapai." };
+          return {
+            goalName: goal.goalName,
+            remaining: Math.round(remaining),
+            monthsWithExtraSaving: Math.ceil(remaining / monthlySaving),
+            note: "Asumsi seluruh penghematan dialihkan ke goal ini dan tidak ada setoran lain.",
+          };
+        })();
+
+        return {
+          scope: args.category ? `kategori ${args.category}` : "total pengeluaran",
+          currency: settings,
+          historyWindowMonths: windowMonths,
+          baselineMonthly,
+          simulatedMonthly: newMonthly,
+          monthlySaving,
+          horizonMonths,
+          savingOverHorizon: monthlySaving * horizonMonths,
+          goalImpact,
+          note: "ESTIMASI, bukan data tercatat. Dihitung dari rata-rata pengeluaran user 3 bulan terakhir dan berasumsi polanya tetap. Sampaikan sebagai perkiraan.",
+        };
+      }
+
+      case "planBudgetFromHistory": {
+        const months = Math.max(1, Math.min(12, Number(args.months ?? 3)));
+        const trimPercent = Math.max(0, Math.min(60, Number(args.targetSavingPercent ?? 10)));
+        const [txs, existing, currency] = await Promise.all([
+          FinanceEngine.getTransactions(userId, { from: daysAgo(months * 30), limit: 1000 }),
+          FinanceEngine.analyzeBudget(userId),
+          resolveUserCurrency(userId),
+        ]);
+        const items = txs.items as unknown as Array<{
+          amount: number; type: string; category: { name: string } | null;
+        }>;
+
+        const totals: Record<string, number> = {};
+        for (const tx of items) {
+          if (tx.type !== "EXPENSE") continue;
+          const cat = tx.category?.name ?? "Other";
+          totals[cat] = (totals[cat] ?? 0) + Number(tx.amount);
+        }
+        const currentLimits = new Map(existing.budgets.map((b) => [b.categoryName, b.limit]));
+
+        const proposals = Object.entries(totals)
+          .map(([categoryName, total]) => {
+            const avgMonthly = Math.round(total / months);
+            return {
+              categoryName,
+              avgMonthly,
+              proposedLimit: Math.round((avgMonthly * (100 - trimPercent)) / 100),
+              currentLimit: currentLimits.get(categoryName) ?? null,
+            };
+          })
+          .filter((p) => p.proposedLimit > 0)
+          .sort((a, b) => b.avgMonthly - a.avgMonthly);
+
+        if (proposals.length === 0) {
+          return {
+            error: `Belum ada pengeluaran tercatat dalam ${months} bulan terakhir, jadi belum bisa menyusun usulan pagu.`,
+          };
+        }
+
+        return {
+          currency,
+          historyWindowMonths: months,
+          trimPercent,
+          proposals,
+          totalProposedLimit: proposals.reduce((sum, p) => sum + p.proposedLimit, 0),
+          totalAvgMonthly: proposals.reduce((sum, p) => sum + p.avgMonthly, 0),
+          note: "USULAN saja — belum ada yang disimpan. Tunjukkan ke user, minta persetujuan, lalu simpan tiap pagu yang disetujui lewat manageBudget.",
+        };
       }
 
       default:

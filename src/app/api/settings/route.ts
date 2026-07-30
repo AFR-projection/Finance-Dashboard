@@ -17,6 +17,8 @@ export async function GET(request: Request) {
       currency: settings.currency,
       timezone: settings.timezone,
       locale: settings.locale,
+      heartbeatEnabled: settings.heartbeatEnabled,
+      heartbeatHour: settings.heartbeatHour,
       owner: {
         ownerName: owner.ownerName,
         hasTelegram: owner.hasTelegram,
@@ -83,11 +85,15 @@ export async function PUT(request: Request) {
       currency?: string;
       timezone?: string;
       encryptedApiKey?: string;
+      heartbeatEnabled?: boolean;
+      heartbeatHour?: number;
     } = {
       aiProvider: parsed.aiProvider,
       aiModel: parsed.aiModel,
       currency: parsed.currency,
       timezone: parsed.timezone,
+      heartbeatEnabled: parsed.heartbeatEnabled,
+      heartbeatHour: parsed.heartbeatHour,
     };
     if (parsed.apiKey) data.encryptedApiKey = encryptSecret(parsed.apiKey);
 
@@ -104,6 +110,8 @@ export async function PUT(request: Request) {
       apiKeyMasked: maskSecret(parsed.apiKey),
       currency: settings.currency,
       timezone: settings.timezone,
+      heartbeatEnabled: settings.heartbeatEnabled,
+      heartbeatHour: settings.heartbeatHour,
     });
   });
 }

@@ -60,6 +60,8 @@ export const aiSettingsSchema = z.object({
   apiKey: z.string().min(10).max(500).optional(),
   currency: z.string().length(3).optional(),
   timezone: z.string().min(1).max(80).optional(),
+  heartbeatEnabled: z.boolean().optional(),
+  heartbeatHour: z.number().int().min(0).max(23).optional(),
 });
 
 export const shareSettingsSchema = z.object({

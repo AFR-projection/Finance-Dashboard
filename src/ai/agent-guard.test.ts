@@ -18,6 +18,7 @@ vi.mock("@/lib/db", () => ({
     userSettings: { findUnique: vi.fn().mockResolvedValue(null) },
     transaction: { findMany: vi.fn().mockResolvedValue([]) },
     financialGoal: { count: vi.fn().mockResolvedValue(0) },
+    aiInsight: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 
@@ -34,6 +35,14 @@ function queueModelReplies(...replies: Array<Record<string, unknown>>) {
       json: async () => ({ choices: [{ message }] }),
     });
   }
+  // A model that keeps repeating itself is exactly what the guards must survive,
+  // so the last reply persists instead of the queue running dry once the agent's
+  // round limit changes.
+  const last = replies[replies.length - 1];
+  mocks.fetch.mockResolvedValue({
+    ok: true,
+    json: async () => ({ choices: [{ message: last }] }),
+  });
 }
 
 describe("runFinanceAgent transport guards", () => {

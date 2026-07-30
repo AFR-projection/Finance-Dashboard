@@ -94,6 +94,8 @@
     @apply font-sans;
     scroll-behavior: smooth;
     -webkit-tap-highlight-color: transparent;
+    /* Standalone mode should not rubber-band like a browser page. */
+    overscroll-behavior-y: none;
   }
   ::selection {
     background: oklch(0.72 0.08 170 / 0.3);
@@ -121,6 +123,9 @@
   }
   .mobile-safe-bottom {
     padding-bottom: max(0.4rem, env(safe-area-inset-bottom));
+  }
+  .mobile-safe-top {
+    padding-top: env(safe-area-inset-top);
   }
   .tabular-money {
     font-variant-numeric: tabular-nums;

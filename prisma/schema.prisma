@@ -52,8 +52,24 @@ model User {
   accessSessions AccessSession[]
   pendingTransactions PendingTransaction[]
   wallets       Wallet[]
+  pushSubscriptions PushSubscription[]
 
   @@map("users")
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  endpoint  String   @unique @db.Text
+  p256dh    String   @db.Text
+  auth      String   @db.Text
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 model Account {
@@ -105,6 +121,8 @@ model UserSettings {
   timezone             String     @default("Asia/Jakarta")
   locale               String     @default("id-ID")
   monthlyIncomeHint    Decimal?   @map("monthly_income_hint") @db.Decimal(18, 2)
+  heartbeatEnabled     Boolean    @default(true) @map("heartbeat_enabled")
+  heartbeatHour        Int        @default(7) @map("heartbeat_hour")
   createdAt            DateTime   @default(now()) @map("created_at")
   updatedAt            DateTime   @updatedAt @map("updated_at")
 
