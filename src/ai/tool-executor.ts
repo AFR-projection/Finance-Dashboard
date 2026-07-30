@@ -29,6 +29,16 @@ function nowInTimezone(timezone: string): {
   };
 }
 
+/**
+ * `getOverview` calls period cash flow `balance`, which a model reads as an
+ * account balance and reports as saldo. The field is renamed before it can ever
+ * reach the model; account balances come only from getFinancialSnapshot.
+ */
+function asCashflow<T extends { balance: number }>(overview: T): Omit<T, "balance"> & { netCashflow: number } {
+  const { balance, ...rest } = overview;
+  return { ...rest, netCashflow: balance };
+}
+
 async function resolveUserTimezone(userId: string): Promise<string> {
   try {
     const { prisma } = await import("@/lib/db");
@@ -172,6 +182,7 @@ export async function executeTool(
             kind: "transaction.created",
             entityId: transaction.id,
             walletId: transaction.walletId ?? walletId,
+            walletName: transaction.wallet?.name ?? walletResolution.wallet.name,
           },
           [CLIENT_MESSAGE_MARKER]: recordedTransactionText({
             type: transaction.type,
@@ -221,8 +232,13 @@ export async function executeTool(
       case "getFinancialSnapshot":
         return FinanceEngine.getFinancialSnapshot(userId, Number(args.days ?? 30));
 
-      case "generateFinancialReport":
-        return FinanceEngine.generateFinancialReport(userId, Number(args.days ?? 30));
+      case "generateFinancialReport": {
+        const report = await FinanceEngine.generateFinancialReport(userId, Number(args.days ?? 30));
+        return {
+          ...asCashflow(report),
+          note: "netCashflow adalah pemasukan dikurangi pengeluaran untuk periode ini, BUKAN saldo rekening. Untuk saldo rekening gunakan getFinancialSnapshot.",
+        };
+      }
 
       case "analyzeBudget":
         return FinanceEngine.analyzeBudget(
@@ -275,7 +291,7 @@ export async function executeTool(
               ? Math.round((report.largestCategory.amount / report.totalExpense) * 100) : null,
             totalIncome: report.totalIncome,
             totalExpense: report.totalExpense,
-            balance: report.balance,
+            netCashflow: report.balance,
             projectedBalance: prediction.projectedBalance,
             riskOverspend: prediction.riskOverspend,
             budgetWarnings: budgets.budgets.filter((b) => b.status !== "ok"),
@@ -314,7 +330,13 @@ export async function executeTool(
           FinanceEngine.getOverview(userId, from, to),
           FinanceEngine.analyzeBudget(userId, month, year),
         ]);
-        return { ...overview, month, year, budgets: budgets_.budgets };
+        return {
+          ...asCashflow(overview),
+          month,
+          year,
+          budgets: budgets_.budgets,
+          note: "netCashflow adalah arus kas bulan ini, BUKAN saldo rekening.",
+        };
       }
 
       case "comparePeriods": {
@@ -329,8 +351,8 @@ export async function executeTool(
           FinanceEngine.getOverview(userId, p2From, p2To),
         ]);
         return {
-          period1: { label: `Last ${period1Days} days`, ...p1 },
-          period2: { label: `Prior (day ${period1Days}-${period2Days} ago)`, ...p2 },
+          period1: { label: `Last ${period1Days} days`, ...asCashflow(p1) },
+          period2: { label: `Prior (day ${period1Days}-${period2Days} ago)`, ...asCashflow(p2) },
           changes: {
             expenseChange: p1.totalExpense - p2.totalExpense,
             expenseChangePct: p2.totalExpense > 0

@@ -5,7 +5,13 @@ import { prisma } from "@/lib/db";
 import { isWalletPromptResult } from "@/messaging/wallet-prompt";
 import type { WalletPrompt } from "@/messaging/wallet-choice";
 import { buildFinanceAgentSystemPrompt } from "./finance-agent-prompt";
-import { getClientMessage } from "./tool-result";
+import { getClientMessage, getVerifiedMutation } from "./tool-result";
+import {
+  classifyDeterministicIntent,
+  enforceGroundedFigures,
+  enforceWriteClaim,
+  requiredToolForIntent,
+} from "./intent-policy";
 
 export type AiRuntimeConfig = {
   provider: "OPENROUTER";
@@ -36,6 +42,16 @@ const ALWAYS_MUTATING_TOOLS = new Set<AgentToolName>([
   "rememberFact",
 ]);
 
+/** Reads that produce the authoritative figures a balance answer may cite. */
+const GROUNDING_READ_TOOLS = new Set<string>([
+  "getFinancialSnapshot",
+  "manageWallet",
+  "getTransactions",
+  "generateFinancialReport",
+  "getMonthlySummary",
+  "financialCoach",
+]);
+
 function isMutatingToolCall(name: AgentToolName, args: Record<string, unknown>): boolean {
   if (name === "manageGoal") return args.action === "create";
   return ALWAYS_MUTATING_TOOLS.has(name);
@@ -45,6 +61,23 @@ function incompleteAgentReply(writeAttempted: boolean): string {
   return writeAttempted
     ? "Proses perubahan data sudah dijalankan, tetapi saya gagal menyusun konfirmasi akhirnya. Periksa dashboard sebelum mencoba lagi agar transaksi tidak tercatat dua kali."
     : "Permintaan data sudah diproses, tetapi saya belum bisa menyusun analisisnya. Silakan coba lagi sebentar lagi.";
+}
+
+/**
+ * Guarantees the account name reaches the user. The tool receipt states which
+ * wallet was actually charged; the model's own sentence routinely omits it, so
+ * the authoritative receipt replaces the prose whenever a wallet name is missing.
+ */
+export function finalText(
+  modelText: string,
+  writes: Array<{ walletName?: string; receipt: string }>,
+): string {
+  if (writes.length === 0) return modelText;
+  const allNamed = writes.every(
+    (write) => write.walletName && modelText.includes(write.walletName),
+  );
+  if (allNamed) return modelText;
+  return writes.map((write) => write.receipt).join("\n\n");
 }
 
 function nowInTimezone(timezone: string): { isoDate: string; time: string; dayNameId: string } {
@@ -142,8 +175,26 @@ async function runOpenRouter(params: {
 
   const toolsUsed: string[] = [];
   const data: unknown[] = [];
+  const writeReceipts: Array<{ walletName?: string; receipt: string }> = [];
   let writeAttempted = false;
   let walletPrompt: WalletPrompt | undefined;
+  let verifiedWrite = false;
+
+  const intent = classifyDeterministicIntent(params.message);
+  const requiredTool = requiredToolForIntent(intent);
+  // A read can be forced safely; forcing a write would let a misread intent
+  // create a transaction the user never asked for. Writes are only nudged, and
+  // a false "tercatat" claim is caught by the guard below instead.
+  const forceableTool = requiredTool === "getFinancialSnapshot" ? requiredTool : undefined;
+
+  // The model's prose is never proof. Every reply that reaches the user is
+  // filtered against what the tools actually returned this turn.
+  const guard = (text: string): string =>
+    enforceGroundedFigures({
+      text: enforceWriteClaim({ text, hasVerifiedWrite: verifiedWrite }),
+      intent,
+      ranRequiredRead: toolsUsed.some((name) => GROUNDING_READ_TOOLS.has(name)),
+    });
 
   type Msg = {
     role: "system" | "user" | "assistant" | "tool";
@@ -161,6 +212,7 @@ async function runOpenRouter(params: {
       ...params.history.map((m) => ({ role: m.role, content: m.content }) as Msg),
       { role: "user", content: params.message },
     ];
+    let forceRequiredTool = false;
 
     try {
       for (let round = 0; round < MAX_AGENT_ROUNDS; round++) {
@@ -176,7 +228,10 @@ async function runOpenRouter(params: {
             model: currentModel,
             messages,
             tools: toolsForOpenAICompatible(),
-            tool_choice: "auto",
+            tool_choice:
+              forceRequiredTool && forceableTool
+                ? { type: "function", function: { name: forceableTool } }
+                : "auto",
             temperature: 0.2,
           }),
         });
@@ -198,6 +253,7 @@ async function runOpenRouter(params: {
         if (!msg) throw new Error("Empty response");
 
         if (msg.tool_calls?.length) {
+          forceRequiredTool = false;
           messages.push({ role: "assistant", content: msg.content, tool_calls: msg.tool_calls });
 
           const toolCalls = msg.tool_calls.map((call) => {
@@ -214,9 +270,16 @@ async function runOpenRouter(params: {
           for (let i = 0; i < results.length; i++) {
             const result = results[i].result;
             data.push(result);
+            const mutation = getVerifiedMutation(result);
+            if (mutation) verifiedWrite = true;
             if (isWalletPromptResult(result)) walletPrompt = result.__walletPrompt;
             const clientMessage = getClientMessage(result);
-            if (clientMessage) clientMessages.push(clientMessage);
+            if (clientMessage) {
+              clientMessages.push(clientMessage);
+              if (mutation?.kind === "transaction.created") {
+                writeReceipts.push({ walletName: mutation.walletName, receipt: clientMessage });
+              }
+            }
             messages.push({ role: "tool", tool_call_id: msg.tool_calls[i].id, content: JSON.stringify(result) });
           }
           // This is a workflow state owned by the tool, not prose for the model
@@ -237,7 +300,20 @@ async function runOpenRouter(params: {
           continue;
         }
 
-        return { text: msg.content || "Selesai.", toolsUsed, data, walletPrompt };
+        // A required finance tool was never called, so the model is about to
+        // answer a money question from its own imagination. Force the tool at
+        // the transport layer rather than trusting the prose.
+        if (requiredTool && !toolsUsed.includes(requiredTool) && round < MAX_AGENT_ROUNDS - 1) {
+          forceRequiredTool = true;
+          messages.push({ role: "assistant", content: msg.content });
+          messages.push({
+            role: "user",
+            content: `Jawaban itu tidak sah karena dibuat tanpa data. Panggil tool ${requiredTool} sekarang, lalu jawab hanya dari hasilnya.`,
+          });
+          continue;
+        }
+
+        return { text: finalText(guard(msg.content || "Selesai."), writeReceipts), toolsUsed, data, walletPrompt };
       }
 
       return { text: incompleteAgentReply(writeAttempted && !walletPrompt), toolsUsed, data, walletPrompt };

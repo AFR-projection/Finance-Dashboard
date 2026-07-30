@@ -9,6 +9,7 @@ export type VerifiedMutation = {
   kind: "transaction.created" | "transaction.updated" | "transaction.deleted";
   entityId: string;
   walletId?: string;
+  walletName?: string;
 };
 
 export function getClientMessage(value: unknown): string | undefined {
@@ -35,5 +36,6 @@ export function getVerifiedMutation(value: unknown): VerifiedMutation | undefine
     kind: candidate.kind,
     entityId: candidate.entityId,
     walletId: typeof candidate.walletId === "string" ? candidate.walletId : undefined,
+    walletName: typeof candidate.walletName === "string" ? candidate.walletName : undefined,
   };
 }
