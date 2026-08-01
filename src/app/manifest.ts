@@ -6,6 +6,8 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "Ledgerly",
     description: "Asisten keuangan pribadi bertenaga AI dengan dashboard dan bot Telegram.",
     lang: "id",
+    // Relative so the PWA installs against whichever host served it — the
+    // dashboard lives on app.<domain> in production but on the apex in dev.
     start_url: "/dashboard",
     scope: "/",
     display: "standalone",

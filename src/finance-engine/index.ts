@@ -319,7 +319,9 @@ export async function getOverview(userId: string, from?: Date, to?: Date) {
       include: { category: true, wallet: true },
     }),
     (async () => {
-      const prevFrom = startOfMonth(new Date(rangeFrom.getFullYear(), rangeFrom.getMonth() - 1, 1));
+      const prevFrom = startOfMonth(
+        new Date(Date.UTC(rangeFrom.getUTCFullYear(), rangeFrom.getUTCMonth() - 1, 1)),
+      );
       return prisma.transaction.findMany({
         where: {
           userId,
@@ -437,15 +439,15 @@ export async function generateFinancialReport(userId: string, days = 30) {
 export async function analyzeBudget(userId: string, month?: number, year?: number) {
   assertUser(userId);
   const now = new Date();
-  const m = month ?? now.getMonth() + 1;
-  const y = year ?? now.getFullYear();
+  const m = month ?? now.getUTCMonth() + 1;
+  const y = year ?? now.getUTCFullYear();
 
   const budgets = await prisma.budget.findMany({
     where: { userId, month: m, year: y },
     include: { category: true },
   });
 
-  const from = new Date(y, m - 1, 1);
+  const from = new Date(Date.UTC(y, m - 1, 1));
   const to = endOfMonth(from);
   const { currency, where: walletFilter } = await primaryCurrencyWalletFilter(userId);
 
@@ -622,7 +624,7 @@ export async function getCashflowSeries(userId: string, months = 6) {
   const { currency, where: walletFilter } = await primaryCurrencyWalletFilter(userId);
 
   for (let i = months - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
     const from = startOfMonth(d);
     const to = endOfMonth(d);
     const txs = await prisma.transaction.findMany({
@@ -636,7 +638,11 @@ export async function getCashflowSeries(userId: string, months = 6) {
       else expense += amount;
     }
     series.push({
-      label: from.toLocaleDateString("id-ID", { month: "short", year: "2-digit" }),
+      label: from.toLocaleDateString("id-ID", {
+        month: "short",
+        year: "2-digit",
+        timeZone: "UTC",
+      }),
       income,
       expense,
     });
@@ -649,9 +655,9 @@ export async function predictMonthEnd(userId: string) {
   assertUser(userId);
   const now = new Date();
   const from = startOfMonth(now);
-  const overview = await getOverview(userId, from, now);
-  const day = now.getDate();
-  const daysInMonth = endOfMonth(now).getDate();
+  const overview = await getOverview(userId, from, endOfMonth(now));
+  const day = now.getUTCDate();
+  const daysInMonth = endOfMonth(now).getUTCDate();
   const dailyBurn = day > 0 ? overview.totalExpense / day : 0;
   const projectedExpense = dailyBurn * daysInMonth;
   const projectedBalance = overview.totalIncome - projectedExpense;

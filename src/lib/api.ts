@@ -1,23 +1,40 @@
 import { FinanceEngineError } from "@/finance-engine";
 import { rateLimit } from "@/lib/rate-limit";
 import { getAccessSession } from "@/lib/access-session";
-import { getAppConfig, requireOwnerUserId } from "@/lib/app-config";
+import { prisma } from "@/lib/db";
 import { NextResponse } from "next/server";
 
-export async function requireUser() {
-  const cfg = await getAppConfig();
-  if (!cfg.isReady) {
-    throw new FinanceEngineError("Setup belum selesai", "SETUP_REQUIRED", 503);
-  }
+export type AuthedUser = {
+  id: string;
+  role: "USER" | "ADMIN";
+};
+
+export async function requireUser(): Promise<AuthedUser> {
   const session = await getAccessSession();
   if (!session?.userId) {
     throw new FinanceEngineError("Unauthorized", "UNAUTHORIZED", 401);
   }
-  const ownerId = await requireOwnerUserId();
-  if (session.userId !== ownerId) {
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { id: true, role: true, status: true },
+  });
+  if (!user) {
     throw new FinanceEngineError("Unauthorized", "UNAUTHORIZED", 401);
   }
-  return { id: session.userId };
+  if (user.status === "SUSPENDED") {
+    throw new FinanceEngineError("Akun ditangguhkan", "SUSPENDED", 403);
+  }
+
+  return { id: user.id, role: user.role };
+}
+
+export async function requireAdmin(): Promise<AuthedUser> {
+  const user = await requireUser();
+  if (user.role !== "ADMIN") {
+    throw new FinanceEngineError("Butuh akses admin", "FORBIDDEN", 403);
+  }
+  return user;
 }
 
 export function jsonOk<T>(data: T, init?: ResponseInit) {
@@ -41,10 +58,10 @@ export function jsonError(error: unknown) {
 export async function withApiGuard(
   request: Request,
   handler: (userId: string) => Promise<Response>,
-  options?: { rateLimitKey?: string; limit?: number },
+  options?: { rateLimitKey?: string; limit?: number; adminOnly?: boolean },
 ) {
   try {
-    const user = await requireUser();
+    const user = options?.adminOnly ? await requireAdmin() : await requireUser();
     const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
     const key = `${options?.rateLimitKey ?? "api"}:${user.id}:${ip}`;
     const rl = rateLimit(key, options?.limit);

@@ -113,10 +113,17 @@ export async function startEmbeddedTelegramBot() {
   }
 
   bot.command("start", async (ctx) => {
+    const chatId = String(ctx.from?.id ?? "");
+
     await ctx.reply(
-      `Ledgerly bot aktif.\nChat ID kamu: ${ctx.from?.id}\n\n` +
-        `/approve KODE - izinkan akses web\n/reject KODE - tolak\n\n` +
-        `Atau kirim pesan biasa seperti "beli makan 35 ribu"`,
+      `Halo! Saya *Ledgerly AI Finance Agent*.\n\n` +
+        `*Chat ID Kamu:*\n\`${chatId}\`\n\n` +
+        `Ketuk angka di atas untuk menyalin, lalu tempel di halaman pendaftaran ` +
+        `untuk mengaktifkan akunmu.\n\n` +
+        `Sudah punya akun? Kirim pesan biasa seperti:\n` +
+        `"beli makan 35 ribu"\n\n` +
+        `/help — contoh penggunaan`,
+      { parse_mode: "Markdown" },
     );
   });
 

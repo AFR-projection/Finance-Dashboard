@@ -310,13 +310,18 @@ apply_runtime_urls() {
   if [[ -n "$domain" && "$domain" != "your.domain.com" ]]; then
     validate_domain "$domain"
     set_env_var APP_DOMAIN "$domain" "$ENV_FILE"
-    set_env_var NEXT_PUBLIC_APP_URL "https://${domain}" "$ENV_FILE"
-    set_env_var AUTH_URL "https://${domain}" "$ENV_FILE"
+    # SITE_URL is the apex (landing, canonical, sitemap, OG); APP_URL is where
+    # the dashboard lives. They differ once the subdomains are in play, and
+    # canonical tags pointing at app.* would split the SEO signal.
+    set_env_var NEXT_PUBLIC_SITE_URL "https://${domain}" "$ENV_FILE"
+    set_env_var NEXT_PUBLIC_APP_URL "https://app.${domain}" "$ENV_FILE"
+    set_env_var AUTH_URL "https://app.${domain}" "$ENV_FILE"
     # Nginx yang menghadap publik — app cukup didengar dari loopback.
     set_env_var APP_BIND "127.0.0.1" "$ENV_FILE"
-    ok "Public URL: https://${domain}"
+    ok "Landing: https://${domain} · Dashboard: https://app.${domain} · Admin: https://admin.${domain}"
   else
     ip="$(detect_public_ip)"
+    set_env_var NEXT_PUBLIC_SITE_URL "http://${ip}:${port}" "$ENV_FILE"
     set_env_var NEXT_PUBLIC_APP_URL "http://${ip}:${port}" "$ENV_FILE"
     set_env_var AUTH_URL "http://${ip}:${port}" "$ENV_FILE"
     # Belum ada domain — port harus terbuka agar bisa diakses via IP.
@@ -373,7 +378,10 @@ upstream ledgerly_upstream {
 server {
     listen 80;
     listen [::]:80;
-    server_name ${domain};
+    # Three surfaces share one app: apex serves the landing page, app.* the
+    # dashboard, admin.* the master panel. src/proxy.ts routes by Host header,
+    # so nginx only has to accept all three names.
+    server_name ${domain} app.${domain} admin.${domain};
 
     client_max_body_size 20M;
 
@@ -430,7 +438,9 @@ sync_nginx_upstream() {
 
   if [[ -n "$domain" && "$domain" != "_" ]]; then
     validate_domain "$domain"
-    sudo_cmd grep -qE "^[[:space:]]*server_name[[:space:]]+${domain//./\\.};" "$NGINX_SITE_AVAILABLE" \
+    # The line now lists three names, so match the apex as a word rather than
+    # anchoring to the end of the directive.
+    sudo_cmd grep -qE "^[[:space:]]*server_name[[:space:]].*[[:space:]]?${domain//./\\.}[[:space:];]" "$NGINX_SITE_AVAILABLE" \
       || die "APP_DOMAIN berubah. Jalankan ./install.sh agar sertifikat domain baru dibuat dengan aman."
   fi
 
@@ -471,12 +481,17 @@ install_nginx_ssl() {
   sudo_cmd systemctl reload nginx
   ok "Nginx proxy → 127.0.0.1:${port}"
 
-  log "Minta sertifikat Let's Encrypt untuk ${domain}…"
-  if ! sudo_cmd certbot --nginx -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --redirect; then
-    err "Certbot gagal. Pastikan DNS A/AAAA sudah mengarah ke VPS, lalu jalankan ./install.sh lagi."
+  log "Minta sertifikat Let's Encrypt untuk ${domain}, app.${domain}, admin.${domain}…"
+  # One certificate covering all three names. Requesting them together means a
+  # single renewal keeps every surface valid; a missing SAN would leave the
+  # dashboard or the admin panel on a browser warning page.
+  if ! sudo_cmd certbot --nginx \
+    -d "$domain" -d "app.${domain}" -d "admin.${domain}" \
+    --non-interactive --agree-tos --register-unsafely-without-email --redirect; then
+    err "Certbot gagal. Pastikan DNS A/AAAA untuk ${domain}, app.${domain}, dan admin.${domain} sudah mengarah ke VPS, lalu jalankan ./install.sh lagi."
     return 1
   fi
-  ok "HTTPS aktif: https://${domain}"
+  ok "HTTPS aktif: https://${domain} · https://app.${domain} · https://admin.${domain}"
 }
 
 print_banner() {

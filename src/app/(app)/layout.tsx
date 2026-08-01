@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   // proxy.ts only checks the signature; revocation is enforced here.
   const session = await getAccessSession();
-  if (!session) redirect("/access");
+  if (!session) redirect("/masuk");
   await touchAccessSession(session.sessionId);
 
   return (

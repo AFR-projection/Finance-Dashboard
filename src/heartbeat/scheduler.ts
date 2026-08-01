@@ -8,6 +8,7 @@
 
 import pino from "pino";
 import { resolveAiConfig } from "@/ai/resolve-config";
+import { requireAiAccess } from "@/ai/entitlement";
 import { prisma } from "@/lib/db";
 import { analyzeHeartbeat } from "./analyst";
 import { dispatchHeartbeat } from "./dispatch";
@@ -74,8 +75,17 @@ export async function runHeartbeatForUser(params: {
   const { userId, cadence, periodKey } = params;
 
   const snapshot = await collectSnapshot(userId, cadence);
+
+  // Heartbeat is a Premium feature; FREE accounts are skipped silently rather
+  // than nagged, since nobody asked for this message.
+  try {
+    await requireAiAccess(userId, "HEARTBEAT");
+  } catch {
+    return "skipped";
+  }
+
   const config = await resolveAiConfig(userId);
-  const analysis = await analyzeHeartbeat({ snapshot, config });
+  const analysis = await analyzeHeartbeat({ snapshot, config, userId });
 
   if (!analysis) return "skipped";
 

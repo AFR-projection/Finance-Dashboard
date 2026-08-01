@@ -4,7 +4,7 @@
 #
 #   cd /opt/ledgerly && ./update.sh
 #
-# Otomatis: git pull → backup .env → rebuild → prisma db push (entrypoint) → health
+# Otomatis: git pull → backup .env → rebuild → prisma migrate deploy (entrypoint) → health
 #
 set -euo pipefail
 
@@ -61,7 +61,7 @@ apply_runtime_urls "$PORT"
 
 step "Rebuild & restart..."
 stack_up_build
-ok "Schema sync via entrypoint (prisma db push → Neon)"
+ok "Migrasi diterapkan via entrypoint (prisma migrate deploy → Neon)"
 
 step "Health-check..."
 wait_app_http "$PORT"

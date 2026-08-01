@@ -74,6 +74,9 @@ export async function getAccessSession() {
   const row = await prisma.accessSession.findUnique({ where: { id: claims.sessionId } });
   if (!row || row.revokedAt || row.expiresAt.getTime() <= Date.now()) return null;
   if (row.userId !== claims.userId) return null;
+  // An ADMIN-scoped session is signed with the same secret, so without this the
+  // admin cookie would also unlock the dashboard. Scopes stay one-way.
+  if (row.scope !== "USER") return null;
 
   return {
     userId: row.userId,
@@ -105,7 +108,7 @@ export async function revokeAllAccessSessions(userId: string) {
 
 export async function listAccessSessions(userId: string) {
   return prisma.accessSession.findMany({
-    where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
+    where: { userId, scope: "USER", revokedAt: null, expiresAt: { gt: new Date() } },
     orderBy: { lastSeenAt: "desc" },
   });
 }

@@ -1,7 +1,8 @@
+import type { Metadata } from "next";
 import { Instrument_Serif, Manrope } from "next/font/google";
-import { Providers } from "@/components/providers";
 import { ServiceWorkerRegister } from "@/components/pwa/service-worker-register";
 import { Toaster } from "@/components/ui/sonner";
+import { SITE_NAME, SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 const manrope = Manrope({
@@ -15,14 +16,27 @@ const instrument = Instrument_Serif({
   variable: "--font-display",
 });
 
-export const metadata = {
-  title: "Ledgerly — AI Financial OS",
-  description: "Personal AI finance assistant with Telegram and a premium dashboard.",
-  applicationName: "Ledgerly",
+export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: `${SITE_NAME} — Catat Keuangan Lewat Chat Telegram`,
+    template: `%s · ${SITE_NAME}`,
+  },
+  description:
+    "Aplikasi catat keuangan berbasis AI. Catat pengeluaran cukup lewat chat Telegram, pantau budget dan target tabungan dari dashboard.",
+  applicationName: SITE_NAME,
   manifest: "/manifest.webmanifest",
+  openGraph: {
+    siteName: SITE_NAME,
+    locale: "id_ID",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+  },
   appleWebApp: {
     capable: true,
-    title: "Ledgerly",
+    title: SITE_NAME,
     statusBarStyle: "black-translucent" as const,
   },
   icons: {
@@ -46,12 +60,17 @@ export const viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="id" className={`${manrope.variable} ${instrument.variable}`}>
+    // `scroll-behavior: smooth` in globals.css powers the landing page anchors.
+    // Next 16 no longer suppresses it during navigation on its own, so without
+    // this attribute every route change would animate its scroll reset.
+    <html
+      lang="id"
+      data-scroll-behavior="smooth"
+      className={`${manrope.variable} ${instrument.variable}`}
+    >
       <body className="min-h-screen font-sans antialiased">
-        <Providers>
-          {children}
-          <Toaster />
-        </Providers>
+        {children}
+        <Toaster />
         <ServiceWorkerRegister />
       </body>
     </html>

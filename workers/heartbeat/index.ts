@@ -71,7 +71,13 @@ async function main() {
     try {
       await tickHeartbeat();
     } catch (err) {
-      log.error({ err }, "Tick heartbeat gagal");
+      // Neon parks an idle database and the first knock after that always
+      // fails while it wakes. That is expected on a free tier, so it is logged
+      // as a one-line warning instead of a stack trace that looks like an outage.
+      const unreachable =
+        typeof err === "object" && err !== null && (err as { code?: string }).code === "P1001";
+      if (unreachable) log.warn("Database sedang bangun (Neon idle) — tick dilewati");
+      else log.error({ err }, "Tick heartbeat gagal");
     }
     await new Promise((resolve) => setTimeout(resolve, TICK_MS));
   }

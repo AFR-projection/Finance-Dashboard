@@ -53,7 +53,9 @@ export async function POST(request: Request) {
       });
     }
 
-    await requireOwnerUserId();
+    // A LOGIN challenge already names its user; only the legacy owner-approval
+    // flow needs the platform owner to exist.
+    if (!challenge.userId) await requireOwnerUserId();
     const approved = await approveAccessChallenge(challenge.sessionId);
     if (!approved) {
       return NextResponse.json({
@@ -73,7 +75,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      data: { text: "✅ Akses diizinkan. Dashboard akan terbuka otomatis." },
+      data: {
+        text:
+          challenge.purpose === "ADMIN_LOGIN"
+            ? "✅ Akses panel admin diizinkan. Halaman login akan lanjut otomatis."
+            : "✅ Akses diizinkan. Dashboard akan terbuka otomatis.",
+      },
     });
   } catch (error) {
     console.error(error);

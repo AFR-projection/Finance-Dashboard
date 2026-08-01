@@ -2,7 +2,7 @@
 
 # Ledgerly production image
 # Build-time: dummy DATABASE_URL (Prisma generate + Next build tanpa hit Neon)
-# Runtime: DATABASE_URL asli dari .env / compose → entrypoint prisma db push
+# Runtime: DATABASE_URL asli dari .env / compose → entrypoint prisma migrate deploy
 
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app

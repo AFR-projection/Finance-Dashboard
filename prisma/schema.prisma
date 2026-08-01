@@ -27,19 +27,122 @@ enum ChannelType {
   WEB
 }
 
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum PlanTier {
+  FREE
+  PREMIUM
+}
+
+/// Heartbeat runs on the platform's dime and must not eat a user's chat quota,
+/// so usage is attributed to its source rather than pooled.
+enum UsageSource {
+  CHAT
+  HEARTBEAT
+}
+
+/// One paid period. Downgrade is computed at request time from
+/// `currentPeriodEnd`, so no cron job can silently fail to demote anyone.
+model Subscription {
+  id                 String   @id @default(cuid())
+  userId             String   @unique @map("user_id")
+  tier               PlanTier @default(FREE)
+  currentPeriodStart DateTime @default(now()) @map("current_period_start")
+  currentPeriodEnd   DateTime @map("current_period_end")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+/// Rolling aggregate read on every quota check. `periodKey` makes the monthly
+/// reset implicit — a new month is simply a new row.
+model AiUsageMonthly {
+  userId    String      @map("user_id")
+  periodKey String      @map("period_key")
+  source    UsageSource
+  tokens    Int         @default(0)
+  requests  Int         @default(0)
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, periodKey, source])
+  @@map("ai_usage_monthly")
+}
+
+/// Per-request detail for auditing what the platform key was spent on.
+model AiUsageLog {
+  id           String      @id @default(cuid())
+  userId       String      @map("user_id")
+  source       UsageSource
+  model        String
+  promptTokens Int         @map("prompt_tokens")
+  outputTokens Int         @map("output_tokens")
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("ai_usage_log")
+}
+
+model Payment {
+  id          String    @id @default(cuid())
+  userId      String    @map("user_id")
+  /// Idempotency key. Midtrans may deliver the same notification many times.
+  orderId     String    @unique @map("order_id")
+  grossAmount Int       @map("gross_amount")
+  status      String
+  paidAt      DateTime? @map("paid_at")
+  raw         Json?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("payments")
+}
+
 model User {
   id            String    @id @default(cuid())
   name          String?
+  /// Auth.js adapter requires a non-null email. Telegram signups have none, so
+  /// they get a `<username>@telegram.local` placeholder rather than a null.
   email         String    @unique
   emailVerified DateTime?
   image         String?
   passwordHash  String?
+  /// Login handle. Nullable because pre-existing owner rows predate it.
+  username       String?    @unique
+  /// Telegram identity. Unique so one chat cannot own two accounts.
+  telegramChatId String?    @unique @map("telegram_chat_id")
+  role           UserRole   @default(USER)
+  status         UserStatus @default(ACTIVE)
+  /// Per-account monthly token allowance. Null means "follow the tier default".
+  tokenQuotaOverride Int?   @map("token_quota_override")
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
   accounts      Account[]
   sessions      Session[]
   settings      UserSettings?
+  subscription  Subscription?
+  aiUsageMonthly AiUsageMonthly[]
+  aiUsageLogs   AiUsageLog[]
+  payments      Payment[]
   categories    Category[]
   transactions  Transaction[]
   budgets       Budget[]
@@ -324,6 +427,25 @@ enum AccessChallengeStatus {
   CONSUMED
 }
 
+enum ChallengePurpose {
+  /// Legacy owner-approval flow: an admin authorises an unknown device.
+  ACCESS
+  /// A brand new signup; the account does not exist until Telegram confirms.
+  REGISTER
+  /// An existing user proving they still hold the linked Telegram chat.
+  LOGIN
+  /// Second factor for the master admin panel; password already verified.
+  ADMIN_LOGIN
+}
+
+/// Which surface a session may open. A USER session must never unlock the admin
+/// panel even if its cookie is replayed there, so the scope is stored on the row
+/// rather than inferred from the user's role at read time.
+enum SessionScope {
+  USER
+  ADMIN
+}
+
 /// Pending "izinkan perangkat ini" requests awaiting owner approval via bot.
 /// Persisted (not in-memory) so a restart or a second process cannot lose a
 /// challenge while the owner is still walking over to Telegram.
@@ -337,6 +459,14 @@ model AccessChallenge {
   country       String?
   city          String?
   status        AccessChallengeStatus @default(PENDING)
+  purpose       ChallengePurpose      @default(ACCESS)
+  /// Whose session this becomes. Null while a REGISTER challenge is still
+  /// waiting for Telegram, because the account does not exist yet.
+  userId        String?               @map("user_id")
+  /// Desired handle, carried only by REGISTER until the account is created.
+  username      String?
+  /// Single-use deep-link token behind `t.me/<bot>?start=reg_<token>`.
+  startToken    String?               @unique @map("start_token")
   attempts      Int                   @default(0)
   expiresAt     DateTime              @map("expires_at")
   approvedAt    DateTime?             @map("approved_at")
@@ -355,6 +485,7 @@ model AccessSession {
   id            String    @id @default(cuid())
   userId        String    @map("user_id")
   fingerprintId String    @map("fingerprint_id")
+  scope         SessionScope @default(USER)
   userAgent     String?   @map("user_agent") @db.Text
   ip            String?
   country       String?
@@ -395,7 +526,8 @@ model PendingTransaction {
   @@map("pending_transactions")
 }
 
-/// Single-tenant owner/bot config (satu instance = satu pemilik)
+/// Platform-wide config. One Telegram bot serves every user, so the token stays
+/// global; `ownerUserId` now means "the first admin", not "the only user".
 model AppConfig {
   id                   String   @id @default("singleton")
   ownerUserId          String?  @unique @map("owner_user_id")
@@ -403,6 +535,20 @@ model AppConfig {
   telegramBotToken     String?  @map("telegram_bot_token") @db.Text
   telegramOwnerChatId  String?  @map("telegram_owner_chat_id")
   setupCompleted       Boolean  @default(false) @map("setup_completed")
+  /// Platform-supplied LLM credentials. Users no longer bring their own key or
+  /// pick their own model — otherwise one account could spend the admin's
+  /// budget on an expensive model.
+  openrouterApiKey     String?  @map("openrouter_api_key") @db.Text
+  aiModel              String   @default("openai/gpt-4o-mini") @map("ai_model")
+  aiFallbackModels     String?  @map("ai_fallback_models")
+  /// Monthly CHAT token allowances. 0 means unlimited.
+  freeTokenQuota       Int      @default(60000) @map("free_token_quota")
+  premiumTokenQuota    Int      @default(1500000) @map("premium_token_quota")
+  premiumPriceIdr      Int      @default(20000) @map("premium_price_idr")
+  heartbeatForFree     Boolean  @default(false) @map("heartbeat_for_free")
+  midtransServerKey    String?  @map("midtrans_server_key") @db.Text
+  midtransClientKey    String?  @map("midtrans_client_key") @db.Text
+  midtransIsProduction Boolean  @default(false) @map("midtrans_is_production")
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 

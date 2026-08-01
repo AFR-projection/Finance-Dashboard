@@ -33,6 +33,15 @@ export async function POST(request: Request) {
         { status: 401 },
       );
     }
+    // An admin second factor is redeemable only at the admin endpoint. Without
+    // this, an approved ADMIN_LOGIN could be cashed in here for a dashboard
+    // session — and worse, the reverse endpoint would still see it as unused.
+    if (challenge.purpose === "ADMIN_LOGIN") {
+      return Response.json(
+        { ok: false, error: { code: "WRONG_FLOW", message: "Gunakan halaman login admin." } },
+        { status: 403 },
+      );
+    }
 
     const ip = getClientIp(request.headers);
     const geo = lookupGeo(ip);
@@ -76,7 +85,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const userId = await requireOwnerUserId();
+    // A challenge now names its own user; only the legacy owner-approval flow
+    // has none. Falling back to the owner for every challenge would hand out
+    // the admin's session to whoever just logged in.
+    const userId = consumed.userId ?? (await requireOwnerUserId());
     await trustDevice({
       userId,
       fingerprintId: body.fingerprintId,

@@ -54,10 +54,12 @@ export const aiMemorySchema = z.object({
   content: z.string().min(1).max(2000),
 });
 
+/**
+ * The model and API key are platform-wide (set by the admin) and deliberately
+ * absent here — while users could type a model name, one account could point at
+ * an expensive model and drain the platform key.
+ */
 export const aiSettingsSchema = z.object({
-  aiProvider: z.literal("OPENROUTER").default("OPENROUTER"),
-  aiModel: z.string().min(1).max(120),
-  apiKey: z.string().min(10).max(500).optional(),
   currency: z.string().length(3).optional(),
   timezone: z.string().min(1).max(80).optional(),
   heartbeatEnabled: z.boolean().optional(),

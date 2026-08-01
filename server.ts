@@ -14,6 +14,39 @@ const port = Number(process.env.PORT || process.env.APP_PORT || 3000);
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
+/**
+ * The app is served from three hosts (apex, app.*, admin.*) but Socket.io was
+ * pinned to a single origin. Accept any subdomain of the configured base so
+ * realtime login does not silently die on two of the three.
+ */
+function buildCorsOrigin() {
+  const configured = [process.env.NEXT_PUBLIC_SITE_URL, process.env.NEXT_PUBLIC_APP_URL]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.replace(/\/$/, ""));
+
+  if (configured.length === 0) return true;
+
+  const allowed = new Set<string>();
+  for (const entry of configured) {
+    try {
+      const url = new URL(entry);
+      allowed.add(url.origin);
+      // Same protocol and port, one label deeper: app.example.com, admin.example.com
+      for (const sub of ["app", "admin"]) {
+        allowed.add(`${url.protocol}//${sub}.${url.host}`);
+      }
+    } catch {
+      // A malformed env value should not take the whole server down.
+    }
+  }
+
+  return (origin: string | undefined, callback: (err: Error | null, ok?: boolean) => void) => {
+    // Same-origin requests and native clients send no Origin header.
+    if (!origin) return callback(null, true);
+    callback(null, allowed.has(origin));
+  };
+}
+
 app.prepare().then(() => {
   const httpServer = createServer(async (req, res) => {
     try {
@@ -29,7 +62,7 @@ app.prepare().then(() => {
   const io = new SocketIOServer(httpServer, {
     path: "/socket.io",
     cors: {
-      origin: process.env.NEXT_PUBLIC_APP_URL || true,
+      origin: buildCorsOrigin(),
       credentials: true,
     },
     transports: ["websocket", "polling"],

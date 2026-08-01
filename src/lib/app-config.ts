@@ -156,6 +156,66 @@ export async function updateOwnerBotConfig(input: {
   return getAppConfig();
 }
 
+export type TelegramSendResult = {
+  delivered: boolean;
+  /** True when Telegram refused because the user never pressed Start. */
+  needsStart?: boolean;
+};
+
+type SendOptions = {
+  approveCode?: string;
+  replyMarkup?: unknown;
+  parseMode?: "Markdown" | "HTML";
+};
+
+function approveKeyboard(code: string) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "✅ Izinkan", callback_data: `access:approve:${code}` },
+        { text: "⛔ Tolak", callback_data: `access:reject:${code}` },
+      ],
+    ],
+  };
+}
+
+/**
+ * One bot serves every account, so the token is platform-wide but the recipient
+ * is not. A 403 means the chat never pressed Start — the caller must offer a
+ * link to the bot rather than reporting a generic failure.
+ */
+export async function sendTelegramMessage(
+  chatId: string,
+  message: string,
+  options: SendOptions = {},
+): Promise<TelegramSendResult> {
+  const cfg = await getAppConfigRaw();
+  if (!cfg.telegramBotToken || !chatId) {
+    return { delivered: false };
+  }
+
+  const reply_markup = options.approveCode
+    ? approveKeyboard(options.approveCode)
+    : options.replyMarkup;
+
+  const response = await fetch(
+    `https://api.telegram.org/bot${cfg.telegramBotToken}/sendMessage`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: message,
+        ...(reply_markup ? { reply_markup } : {}),
+        ...(options.parseMode ? { parse_mode: options.parseMode } : {}),
+      }),
+    },
+  );
+
+  if (response.ok) return { delivered: true };
+  return { delivered: false, needsStart: response.status === 403 };
+}
+
 /**
  * Telegram is the only owner channel, so a missing token means nobody was
  * reached. Callers must show the code on screen instead of assuming delivery.
@@ -165,33 +225,17 @@ export async function notifyOwner(
   options: { approveCode?: string } = {},
 ): Promise<{ delivered: boolean }> {
   const cfg = await getAppConfigRaw();
-  if (!cfg.telegramBotToken || !cfg.telegramOwnerChatId) {
-    return { delivered: false };
-  }
+  if (!cfg.telegramOwnerChatId) return { delivered: false };
+  return sendTelegramMessage(cfg.telegramOwnerChatId, message, options);
+}
 
-  const reply_markup = options.approveCode
-    ? {
-        inline_keyboard: [
-          [
-            { text: "✅ Izinkan", callback_data: `access:approve:${options.approveCode}` },
-            { text: "⛔ Tolak", callback_data: `access:reject:${options.approveCode}` },
-          ],
-        ],
-      }
-    : undefined;
+/** Deep links need the @handle, and it is only discoverable from the token. */
+export async function getBotUsername(): Promise<string | null> {
+  const cfg = await getAppConfigRaw();
+  if (!cfg.telegramBotToken) return null;
 
-  const response = await fetch(
-    `https://api.telegram.org/bot${cfg.telegramBotToken}/sendMessage`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: cfg.telegramOwnerChatId,
-        text: message,
-        ...(reply_markup ? { reply_markup } : {}),
-      }),
-    },
-  );
-
-  return { delivered: response.ok };
+  const response = await fetch(`https://api.telegram.org/bot${cfg.telegramBotToken}/getMe`);
+  if (!response.ok) return null;
+  const json = (await response.json()) as { result?: { username?: string } };
+  return json.result?.username ?? null;
 }

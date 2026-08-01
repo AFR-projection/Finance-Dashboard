@@ -154,22 +154,15 @@ async function main() {
 
   bot.command("start", async (ctx) => {
     const id = String(ctx.from?.id ?? "");
+
     await ctx.reply(
       `Halo! Saya *Ledgerly AI Finance Agent*.\n\n` +
-        `Chat ID Kamu: \`${id}\`\n\n` +
-        `*Cara hubungkan akun:*\n` +
-        `1. Buka dashboard web > Channels\n` +
-        `2. Generate pairing code\n` +
-        `3. Kirim /link KODE\n\n` +
-        `*Commands:*\n` +
-        `/link KODE — Tautkan akun\n` +
-        `/approve KODE — Izinkan akses web\n` +
-        `/reject KODE — Tolak akses web\n` +
-        `/report — Laporan 30 hari\n` +
-        `/balance — Ringkasan bulan ini\n` +
-        `/expense — Analisis pengeluaran\n` +
-        `/help — Contoh penggunaan\n\n` +
-        `Atau kirim pesan biasa seperti: "beli makan 35 ribu"`,
+        `*Chat ID Kamu:*\n\`${id}\`\n\n` +
+        `Ketuk angka di atas untuk menyalin, lalu tempel di halaman pendaftaran ` +
+        `untuk mengaktifkan akunmu.\n\n` +
+        `Sudah punya akun? Kirim pesan biasa seperti:\n` +
+        `"beli makan 35 ribu"\n\n` +
+        `/help — contoh penggunaan`,
       { parse_mode: "Markdown" },
     );
   });
@@ -268,7 +261,31 @@ async function main() {
   });
 }
 
-main().catch((err) => {
+/**
+ * A 409 means another instance holds the polling lock — usually the VPS while a
+ * laptop is also running, since one token allows exactly one poller. Exiting
+ * would leave the bot silent until someone restarts the stack by hand, so we
+ * wait for the other side to release the token instead.
+ */
+const POLL_CONFLICT_RETRY_MS = 30_000;
+
+async function runForever() {
+  for (;;) {
+    try {
+      await main();
+      return;
+    } catch (err) {
+      if (!(err instanceof GrammyError) || err.error_code !== 409) throw err;
+      log.warn(
+        `Token dipakai instance lain (409). Coba lagi dalam ${POLL_CONFLICT_RETRY_MS / 1000}s — ` +
+          `matikan instance lain, atau pakai bot terpisah untuk development.`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, POLL_CONFLICT_RETRY_MS));
+    }
+  }
+}
+
+runForever().catch((err) => {
   log.fatal({ err }, "Telegram worker berhenti");
   process.exitCode = 1;
 });

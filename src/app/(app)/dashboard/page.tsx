@@ -37,6 +37,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AuroraScene } from "@/components/motion/aurora-scene";
 import { TiltCard } from "@/components/motion/tilt-card";
 import { CountUp } from "@/components/motion/count-up";
+import { SubscriptionCard } from "@/components/dashboard/subscription-card";
 
 const reveal = {
   hidden: { opacity: 0, y: 22, filter: "blur(6px)" },
@@ -268,7 +269,7 @@ export default function OverviewPage() {
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/55">
-                            Arus kas bersih · {currency.currency}
+                            Total aset · {currency.currency}
                           </p>
                           {currency.currency === data.overview.currency && (
                             <span className="rounded-md bg-white/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-white/65">
@@ -276,12 +277,15 @@ export default function OverviewPage() {
                             </span>
                           )}
                         </div>
+                        {/* Saldo gabungan semua rekening — angka yang orang cari
+                            duluan, seperti membuka aplikasi bank. Arus kas
+                            bulan berjalan turun ke baris di bawahnya. */}
                         <p className="tabular-money mt-2 text-[2rem] font-semibold leading-none depth-2 sm:text-4xl">
                           {privateMode ? (
                             "••••••••"
                           ) : (
                             <CountUp
-                              value={currency.balance}
+                              value={currency.totalAssets}
                               format={(value) => formatCurrency(value, currency.currency)}
                             />
                           )}
@@ -289,7 +293,13 @@ export default function OverviewPage() {
                         <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] font-medium text-white/50">
                           <span>{walletCount} rekening</span>
                           <span className="size-1 rounded-full bg-white/25" />
-                          <span>Total aset {money(currency.totalAssets, currency.currency)}</span>
+                          <span>
+                            Arus kas {monthName}{" "}
+                            <span className={currency.balance < 0 ? "text-rose-300" : "text-emerald-300"}>
+                              {currency.balance >= 0 ? "+" : ""}
+                              {money(currency.balance, currency.currency)}
+                            </span>
+                          </span>
                           <span className="size-1 rounded-full bg-white/25" />
                           <span>Saving rate {currency.savingRate}%</span>
                         </div>
@@ -302,7 +312,7 @@ export default function OverviewPage() {
                     <div className="preserve-3d mt-7 grid grid-cols-2 gap-3 depth-2 sm:max-w-lg">
                       <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 backdrop-blur">
                         <div className="flex items-center gap-2 text-[10px] text-white/55">
-                          <ArrowDownLeft className="size-3.5 text-emerald-300" /> Pemasukan
+                          <ArrowDownLeft className="size-3.5 text-emerald-300" /> Masuk bulan ini
                         </div>
                         <p className="tabular-money mt-1.5 truncate text-sm font-semibold sm:text-base">
                           {money(currency.totalIncome, currency.currency)}
@@ -310,7 +320,7 @@ export default function OverviewPage() {
                       </div>
                       <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-3.5 backdrop-blur">
                         <div className="flex items-center gap-2 text-[10px] text-white/55">
-                          <ArrowUpRight className="size-3.5 text-amber-300" /> Pengeluaran
+                          <ArrowUpRight className="size-3.5 text-amber-300" /> Keluar bulan ini
                         </div>
                         <p className="tabular-money mt-1.5 truncate text-sm font-semibold sm:text-base">
                           {money(currency.totalExpense, currency.currency)}
@@ -402,6 +412,10 @@ export default function OverviewPage() {
             </motion.div>
           );
         })}
+      </motion.section>
+
+      <motion.section variants={reveal} transition={revealTransition}>
+        <SubscriptionCard />
       </motion.section>
 
       <motion.div

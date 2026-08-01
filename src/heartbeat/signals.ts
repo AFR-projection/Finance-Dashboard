@@ -9,7 +9,7 @@
 
 import { FinanceEngine } from "@/finance-engine";
 import { prisma } from "@/lib/db";
-import { daysAgo } from "@/lib/utils";
+import { daysAgo, startOfMonth } from "@/lib/utils";
 
 export type Severity = "info" | "good" | "warning" | "critical";
 
@@ -81,7 +81,7 @@ export async function collectSnapshot(
   const monthTxs = await prisma.transaction.findMany({
     where: {
       userId,
-      transactionDate: { gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) },
+      transactionDate: { gte: startOfMonth() },
     },
     include: { category: true },
   });
@@ -100,7 +100,7 @@ export async function collectSnapshot(
     where: { userId, transactionDate: { gte: historyFrom } },
     include: { category: true },
   });
-  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const monthStart = startOfMonth();
   const baselineTotals: Record<string, number> = {};
   const baselineMonths = new Set<string>();
   for (const tx of historyTxs) {

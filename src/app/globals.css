@@ -37,10 +37,17 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-foreground: var(--ink-foreground);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-border: var(--ink-border);
+  --color-brand-glow: var(--brand-glow);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 2);
 }
 
 :root {
@@ -76,6 +83,20 @@
   --sidebar-accent-foreground: oklch(0.28 0.05 165);
   --sidebar-border: oklch(0.88 0.02 145);
   --sidebar-ring: oklch(0.45 0.07 165);
+
+  /*
+   * Marketing dark-surface palette ("ink"). The app itself is light-only;
+   * these exist so landing sections can dip into the vault aesthetic with
+   * real tokens instead of ad-hoc white/NN opacities. Foreground pairs are
+   * chosen for WCAG AA on --ink: ink-foreground ≈ 13:1, ink-muted ≈ 7:1.
+   */
+  --ink: oklch(0.16 0.03 190);
+  --ink-soft: oklch(0.21 0.032 188);
+  --ink-foreground: oklch(0.96 0.008 175);
+  --ink-muted: oklch(0.72 0.02 180);
+  --ink-border: oklch(0.32 0.025 185);
+  /* Teal bright enough to read on ink (≈ 4.9:1) — links/icons on dark. */
+  --brand-glow: oklch(0.78 0.12 175);
 }
 
 @layer base {
@@ -250,6 +271,104 @@
 
   .breathe {
     animation: breathe 4.5s ease-in-out infinite;
+  }
+
+  /* ---- Marketing (landing) system ------------------------------------- */
+
+  /* Fluid display scale: 375px → 1440px without per-breakpoint overrides. */
+  .mk-display {
+    font-size: clamp(2.6rem, 1.55rem + 4.5vw, 4.6rem);
+    line-height: 1.02;
+    letter-spacing: -0.045em;
+    font-weight: 800;
+  }
+  .mk-h2 {
+    font-size: clamp(1.9rem, 1.42rem + 2vw, 2.8rem);
+    line-height: 1.08;
+    letter-spacing: -0.04em;
+    font-weight: 700;
+  }
+  .mk-lead {
+    font-size: clamp(1.05rem, 0.95rem + 0.45vw, 1.25rem);
+    line-height: 1.6;
+  }
+  /* Serif accent — one italic phrase per heading, never whole headings. */
+  .mk-serif {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-style: italic;
+    letter-spacing: -0.01em;
+  }
+
+  /* Vertical rhythm: every landing section breathes the same amount. */
+  .mk-section {
+    padding-block: clamp(4rem, 2.5rem + 6vw, 7.5rem);
+  }
+
+  .mk-container {
+    margin-inline: auto;
+    width: 100%;
+    max-width: 72rem;
+    padding-inline: clamp(1.25rem, 4vw, 2rem);
+  }
+
+  /* Interactive base: consistent focus + touch target on every CTA. */
+  .mk-cta {
+    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl px-6 text-sm font-semibold outline-none transition-all duration-200 focus-visible:ring-3 focus-visible:ring-ring/60 focus-visible:ring-offset-2 active:translate-y-0;
+  }
+  .mk-cta-primary {
+    @apply bg-primary text-primary-foreground hover:-translate-y-0.5 hover:bg-primary/90;
+    box-shadow: 0 20px 44px -22px oklch(0.32 0.075 174 / 0.8);
+  }
+  .mk-cta-ghost {
+    @apply border border-border bg-card/80 text-foreground backdrop-blur hover:-translate-y-0.5 hover:bg-card;
+  }
+  /* On-ink variant: white pill, dark text, ring visible against dark bg. */
+  .mk-cta-inverse {
+    @apply bg-white text-ink hover:-translate-y-0.5 hover:bg-white/90 focus-visible:ring-white/50 focus-visible:ring-offset-ink;
+  }
+
+  .mk-card {
+    @apply rounded-3xl border border-white/70 bg-card/80 backdrop-blur-xl;
+    box-shadow: 0 18px 45px -32px rgba(15, 45, 38, 0.35);
+  }
+  .mk-card-hover {
+    @apply transition-all duration-300 hover:-translate-y-1;
+  }
+  .mk-card-hover:hover {
+    box-shadow: 0 30px 60px -30px rgba(15, 45, 38, 0.45);
+  }
+
+  .mk-eyebrow {
+    @apply inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] text-primary;
+  }
+
+  /* Ink sections reuse the vault gradient but expose token-based text. */
+  .mk-ink {
+    color: var(--ink-foreground);
+    background:
+      radial-gradient(ellipse 120% 80% at 50% -20%, oklch(0.35 0.09 175 / 0.5), transparent 60%),
+      radial-gradient(ellipse 90% 60% at 85% 110%, oklch(0.42 0.1 92 / 0.28), transparent 62%),
+      linear-gradient(165deg, var(--ink-soft), oklch(0.11 0.02 200) 55%, var(--ink));
+  }
+
+  /* Skip link: hidden until focused, then a clear pill at the top. */
+  .mk-skip-link {
+    position: fixed;
+    top: 0.75rem;
+    left: 50%;
+    z-index: 100;
+    translate: -50% -300%;
+    padding: 0.65rem 1.25rem;
+    border-radius: 999px;
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-size: 0.875rem;
+    font-weight: 600;
+    transition: translate 0.2s ease;
+  }
+  .mk-skip-link:focus-visible {
+    translate: -50% 0;
   }
 }
 

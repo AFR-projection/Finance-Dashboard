@@ -1,30 +1,31 @@
-import { encryptSecret, maskSecret } from "@/lib/crypto";
 import { prisma } from "@/lib/db";
 import { aiSettingsSchema } from "@/finance-engine/schemas";
 import { FinanceEngine } from "@/finance-engine";
-import { jsonOk, withApiGuard } from "@/lib/api";
+import { jsonOk, requireAdmin, withApiGuard } from "@/lib/api";
 import { getAppConfig, updateOwnerBotConfig } from "@/lib/app-config";
 
 export async function GET(request: Request) {
   return withApiGuard(request, async (userId) => {
     const settings = await FinanceEngine.ensureUserSettings(userId);
+    const isAdmin = await prisma.user
+      .findUnique({ where: { id: userId }, select: { role: true } })
+      .then((u) => u?.role === "ADMIN");
     const owner = await getAppConfig();
     return jsonOk({
-      aiProvider: settings.aiProvider,
-      aiModel: settings.aiModel,
-      hasApiKey: Boolean(settings.encryptedApiKey),
-      apiKeyMasked: settings.encryptedApiKey ? "••••••••••••" : null,
       currency: settings.currency,
       timezone: settings.timezone,
       locale: settings.locale,
       heartbeatEnabled: settings.heartbeatEnabled,
       heartbeatHour: settings.heartbeatHour,
-      owner: {
-        ownerName: owner.ownerName,
-        hasTelegram: owner.hasTelegram,
-        telegramOwnerChatId: owner.telegramOwnerChatId,
-        isReady: owner.isReady,
-      },
+      // Platform bot config belongs to admins; a normal user must not see it.
+      owner: isAdmin
+        ? {
+            ownerName: owner.ownerName,
+            hasTelegram: owner.hasTelegram,
+            telegramOwnerChatId: owner.telegramOwnerChatId,
+            isReady: owner.isReady,
+          }
+        : null,
     });
   });
 }
@@ -35,6 +36,8 @@ export async function PUT(request: Request) {
     const section = body.section || "ai";
 
     if (section === "owner") {
+      // Mutates the platform-wide bot token, so it stays admin-only.
+      await requireAdmin();
       try {
         const owner = await updateOwnerBotConfig({
           ownerName: body.ownerName,
@@ -79,35 +82,24 @@ export async function PUT(request: Request) {
     }
 
     const parsed = aiSettingsSchema.parse(body);
-    const data: {
-      aiProvider: "OPENROUTER";
-      aiModel: string;
-      currency?: string;
-      timezone?: string;
-      encryptedApiKey?: string;
-      heartbeatEnabled?: boolean;
-      heartbeatHour?: number;
-    } = {
-      aiProvider: parsed.aiProvider,
-      aiModel: parsed.aiModel,
-      currency: parsed.currency,
-      timezone: parsed.timezone,
-      heartbeatEnabled: parsed.heartbeatEnabled,
-      heartbeatHour: parsed.heartbeatHour,
-    };
-    if (parsed.apiKey) data.encryptedApiKey = encryptSecret(parsed.apiKey);
-
     const settings = await prisma.userSettings.upsert({
       where: { userId },
-      update: data,
-      create: { userId, ...data },
+      update: {
+        currency: parsed.currency,
+        timezone: parsed.timezone,
+        heartbeatEnabled: parsed.heartbeatEnabled,
+        heartbeatHour: parsed.heartbeatHour,
+      },
+      create: {
+        userId,
+        currency: parsed.currency,
+        timezone: parsed.timezone,
+        heartbeatEnabled: parsed.heartbeatEnabled,
+        heartbeatHour: parsed.heartbeatHour,
+      },
     });
 
     return jsonOk({
-      aiProvider: settings.aiProvider,
-      aiModel: settings.aiModel,
-      hasApiKey: Boolean(settings.encryptedApiKey),
-      apiKeyMasked: maskSecret(parsed.apiKey),
       currency: settings.currency,
       timezone: settings.timezone,
       heartbeatEnabled: settings.heartbeatEnabled,

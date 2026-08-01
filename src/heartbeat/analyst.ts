@@ -8,6 +8,7 @@
 
 import pino from "pino";
 import type { AiRuntimeConfig } from "@/ai/agent";
+import { recordAiUsage } from "@/ai/usage";
 import type { HeartbeatSnapshot } from "./signals";
 
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
@@ -92,6 +93,8 @@ function parseAnalysis(raw: string): HeartbeatAnalysis | null {
 export async function analyzeHeartbeat(params: {
   snapshot: HeartbeatSnapshot;
   config: AiRuntimeConfig;
+  /** Set to attribute token spend; heartbeat never consumes the user's quota. */
+  userId?: string;
 }): Promise<HeartbeatAnalysis | null> {
   const { snapshot, config } = params;
   if (!config.apiKey) {
@@ -129,7 +132,21 @@ export async function analyzeHeartbeat(params: {
 
       const json = (await res.json()) as {
         choices?: Array<{ message?: { content?: string | null } }>;
+        usage?: { prompt_tokens?: number; completion_tokens?: number };
       };
+
+      if (params.userId && json.usage) {
+        await recordAiUsage({
+          userId: params.userId,
+          source: "HEARTBEAT",
+          model,
+          usage: {
+            promptTokens: json.usage.prompt_tokens ?? 0,
+            outputTokens: json.usage.completion_tokens ?? 0,
+          },
+        });
+      }
+
       const content = json.choices?.[0]?.message?.content ?? "";
       const analysis = parseAnalysis(content);
       if (analysis) return analysis;

@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db";
 import { isWalletPromptResult } from "@/messaging/wallet-prompt";
 import type { WalletPrompt } from "@/messaging/wallet-choice";
 import { buildFinanceAgentSystemPrompt } from "./finance-agent-prompt";
+import { recordAiUsage } from "./usage";
 import { getClientMessage, getVerifiedMutation } from "./tool-result";
 import {
   classifyDeterministicIntent,
@@ -28,6 +29,8 @@ export type AgentReply = {
   data?: unknown[];
   /** Set when a transaction is held back until the user taps a wallet button. */
   walletPrompt?: WalletPrompt;
+  /** Tokens burned across every round and every model in the fallback chain. */
+  usage?: { promptTokens: number; outputTokens: number; model: string };
 };
 
 export type AgentMessage = {
@@ -219,6 +222,17 @@ export async function runFinanceAgent(params: {
   const history = await loadHistory(userId, channel);
   const reply = await runOpenRouter({ userId, message, config, channel, history });
 
+  // Recorded here rather than at each return inside the model loop: there are a
+  // dozen exit paths and a missed one would be free tokens.
+  if (reply.usage) {
+    await recordAiUsage({
+      userId,
+      source: "CHAT",
+      model: reply.usage.model,
+      usage: { promptTokens: reply.usage.promptTokens, outputTokens: reply.usage.outputTokens },
+    });
+  }
+
   await appendHistory(userId, channel, [
     { role: "user", content: message },
     { role: "assistant", content: reply.text },
@@ -234,6 +248,24 @@ async function runOpenRouter(params: {
   channel: "TELEGRAM" | "WEB";
   history: AgentMessage[];
 }): Promise<AgentReply> {
+  // The accumulator lives out here so every early return inside the model loop
+  // still reports what it spent — there are a dozen exit paths and a missed one
+  // would be free tokens.
+  const usage = { promptTokens: 0, outputTokens: 0, model: "" };
+  const reply = await runOpenRouterInner(params, usage);
+  return usage.model ? { ...reply, usage } : reply;
+}
+
+async function runOpenRouterInner(
+  params: {
+    userId: string;
+    message: string;
+    config: AiRuntimeConfig;
+    channel: "TELEGRAM" | "WEB";
+    history: AgentMessage[];
+  },
+  usage: { promptTokens: number; outputTokens: number; model: string },
+): Promise<AgentReply> {
   const userContext = await loadUserContext(params.userId, params.message);
   const systemPrompt = buildFinanceAgentSystemPrompt({
     channel: params.channel,
@@ -278,6 +310,7 @@ async function runOpenRouter(params: {
   let lastError = "Unknown";
 
   for (const currentModel of [primary, ...fallbacks]) {
+    usage.model = currentModel;
     const messages: Msg[] = [
       { role: "system", content: systemPrompt },
       ...params.history.map((m) => ({ role: m.role, content: m.content }) as Msg),
@@ -321,7 +354,11 @@ async function runOpenRouter(params: {
               tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
             };
           }>;
+          usage?: { prompt_tokens?: number; completion_tokens?: number };
         };
+
+        usage.promptTokens += json.usage?.prompt_tokens ?? 0;
+        usage.outputTokens += json.usage?.completion_tokens ?? 0;
 
         const msg = json.choices[0]?.message;
         if (!msg) throw new Error("Empty response");

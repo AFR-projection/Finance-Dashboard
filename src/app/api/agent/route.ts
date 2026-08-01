@@ -1,5 +1,6 @@
 import { agentMessageSchema } from "@/finance-engine/schemas";
 import { runFinanceAgent } from "@/ai/agent";
+import { requireAiAccess } from "@/ai/entitlement";
 import { resolveAiConfig } from "@/ai/resolve-config";
 import { jsonOk, withApiGuard } from "@/lib/api";
 import { settlePendingWalletReply } from "@/messaging/settle-wallet-reply";
@@ -22,6 +23,10 @@ export async function POST(request: Request) {
         ]);
         return jsonOk({ text: settled, toolsUsed: [] });
       }
+
+      // Checked after the wallet reply: settling a pending transaction is a
+      // database write, not an LLM call, so it must not be paywalled.
+      await requireAiAccess(userId, "CHAT");
 
       const config = await resolveAiConfig(userId);
       const reply = await runFinanceAgent({

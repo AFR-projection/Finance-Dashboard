@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
-import { AccessChallengeStatus } from "@prisma/client";
+import { AccessChallengeStatus, ChallengePurpose } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
 export type AccessChallenge = {
@@ -10,6 +10,9 @@ export type AccessChallenge = {
   country?: string | null;
   city?: string | null;
   status: "pending" | "approved" | "rejected" | "expired";
+  purpose: ChallengePurpose;
+  userId: string | null;
+  username: string | null;
   attempts: number;
   createdAt: number;
 };
@@ -38,6 +41,9 @@ type Row = {
   country: string | null;
   city: string | null;
   status: AccessChallengeStatus;
+  purpose: ChallengePurpose;
+  userId: string | null;
+  username: string | null;
   attempts: number;
   createdAt: Date;
 };
@@ -51,6 +57,9 @@ function toChallenge(row: Row): AccessChallenge {
     country: row.country,
     city: row.city,
     status: STATUS_OUT[row.status],
+    purpose: row.purpose,
+    userId: row.userId,
+    username: row.username,
     attempts: row.attempts,
     createdAt: row.createdAt.getTime(),
   };
@@ -71,6 +80,9 @@ export async function createAccessChallenge(input: {
   ip: string;
   country?: string | null;
   city?: string | null;
+  purpose?: ChallengePurpose;
+  userId?: string | null;
+  username?: string | null;
 }) {
   // One live challenge per device keeps an attacker from farming valid codes.
   await prisma.accessChallenge.deleteMany({
@@ -86,6 +98,9 @@ export async function createAccessChallenge(input: {
       ip: input.ip,
       country: input.country ?? null,
       city: input.city ?? null,
+      purpose: input.purpose ?? ChallengePurpose.ACCESS,
+      userId: input.userId ?? null,
+      username: input.username ?? null,
       expiresAt: new Date(Date.now() + TTL * 1000),
     },
   });
@@ -139,6 +154,22 @@ export async function approveAccessChallenge(sessionId: string) {
       expiresAt: { gt: new Date() },
     },
     data: { status: AccessChallengeStatus.APPROVED, approvedAt: new Date() },
+  });
+  return updated.count > 0;
+}
+
+/**
+ * Binds a freshly created account to its REGISTER challenge and approves it in
+ * one statement, so a second submission cannot mint a second session.
+ */
+export async function attachUserAndApprove(sessionId: string, userId: string) {
+  const updated = await prisma.accessChallenge.updateMany({
+    where: {
+      sessionId,
+      status: AccessChallengeStatus.PENDING,
+      expiresAt: { gt: new Date() },
+    },
+    data: { status: AccessChallengeStatus.APPROVED, approvedAt: new Date(), userId },
   });
   return updated.count > 0;
 }

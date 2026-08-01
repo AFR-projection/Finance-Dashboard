@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { runFinanceAgent } from "@/ai/agent";
+import { requireAiAccess } from "@/ai/entitlement";
+import { FinanceEngineError } from "@/finance-engine";
 import { resolveAiConfig } from "@/ai/resolve-config";
 import { prisma } from "@/lib/db";
 import { rateLimit } from "@/lib/rate-limit";
@@ -57,6 +59,20 @@ export async function POST(request: Request) {
         { role: "assistant", content: settled },
       ]);
       return NextResponse.json({ ok: true, data: { text: settled, toolsUsed: [] } });
+    }
+
+    // Paywall sits after the wallet-choice settlement above, which is a plain
+    // database write. Telegram gets the quota message as ordinary bot text.
+    try {
+      await requireAiAccess(link.userId, "CHAT");
+    } catch (error) {
+      if (error instanceof FinanceEngineError) {
+        return NextResponse.json({
+          ok: true,
+          data: { text: `${error.message}\n\nUpgrade lewat dashboard web.`, toolsUsed: [] },
+        });
+      }
+      throw error;
     }
 
     const reply = await runFinanceAgent({
