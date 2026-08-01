@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   brandIcon as BrandIcon,
   intelligenceNav,
+  planningNav,
   primaryNav,
   systemNav,
   type NavItem,
@@ -19,7 +20,7 @@ export function AppSidebar() {
 
   async function logout() {
     await fetch("/api/access/logout", { method: "POST" });
-    router.push("/access");
+    router.push("/masuk");
     router.refresh();
   }
 
@@ -69,6 +70,12 @@ export function AppSidebar() {
 
       <nav className="hide-scrollbar flex flex-1 flex-col gap-5 overflow-y-auto pb-4">
         <div className="space-y-1">{primaryNav.map(navLink)}</div>
+        <div>
+          <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground/70">
+            Perencanaan
+          </p>
+          <div className="space-y-1">{planningNav.map(navLink)}</div>
+        </div>
         <div>
           <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground/70">
             Intelligence

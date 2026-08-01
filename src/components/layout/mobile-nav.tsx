@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import {
   brandIcon as BrandIcon,
   intelligenceNav,
+  planningNav,
   mobilePrimaryNav,
   primaryNav,
   systemNav,
@@ -26,7 +27,7 @@ export function MobileNav() {
   const pathname = usePathname();
   const active = (href: string) =>
     pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
-  const moreItems = [...primaryNav.slice(2, 3), ...intelligenceNav.slice(1), ...systemNav];
+  const moreItems = [...primaryNav.slice(2, 3), ...planningNav, ...intelligenceNav.slice(1), ...systemNav];
 
   return (
     <>

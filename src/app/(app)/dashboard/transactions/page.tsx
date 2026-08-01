@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ArrowDownLeft, ArrowUpRight, Download, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Download, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,9 +67,12 @@ const emptyForm = (): FormState => ({
 export default function TransactionsPage() {
   const [items, setItems] = useState<Tx[]>([]);
   const [wallets, setWallets] = useState<WalletOption[]>([]);
+  const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
   const [search, setSearch] = useState("");
   const [type, setType] = useState<string>("ALL");
   const [walletFilter, setWalletFilter] = useState<string>("ALL");
+  const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
+  const [period, setPeriod] = useState<string>("30");
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm());
@@ -80,6 +83,12 @@ export default function TransactionsPage() {
     if (search) params.set("search", search);
     if (type !== "ALL") params.set("type", type);
     if (walletFilter !== "ALL") params.set("walletId", walletFilter);
+    if (categoryFilter !== "ALL") params.set("categoryId", categoryFilter);
+    if (period !== "ALL") {
+      const from = new Date();
+      from.setUTCDate(from.getUTCDate() - Number(period));
+      params.set("from", from.toISOString().slice(0, 10));
+    }
     params.set("limit", "100");
     const res = await fetch(`/api/transactions?${params}`);
     const json = await res.json();
@@ -87,11 +96,31 @@ export default function TransactionsPage() {
     setLoading(false);
   }
 
+  const activeFilters =
+    (type !== "ALL" ? 1 : 0) +
+    (walletFilter !== "ALL" ? 1 : 0) +
+    (categoryFilter !== "ALL" ? 1 : 0) +
+    (period !== "30" ? 1 : 0) +
+    (search ? 1 : 0);
+
+  function resetFilters() {
+    setSearch("");
+    setType("ALL");
+    setWalletFilter("ALL");
+    setCategoryFilter("ALL");
+    setPeriod("30");
+  }
+
   useEffect(() => {
     const initial = setTimeout(() => void load(), 0);
     void fetch("/api/wallets")
       .then((r) => r.json())
-      .then((j: { data?: WalletOption[] }) => setWallets(j.data ?? []));
+      .then((j: { data?: WalletOption[] }) =>
+        setWallets((j.data ?? []).filter((w) => (w as { isActive?: boolean }).isActive !== false)),
+      );
+    void fetch("/api/categories")
+      .then((r) => r.json())
+      .then((j: { data?: Array<{ id: string; name: string }> }) => setCategories(j.data ?? []));
     return () => clearTimeout(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -176,13 +205,21 @@ export default function TransactionsPage() {
   }
 
   // Currencies are never converted, so a single net figure would be meaningless.
-  const netByCurrency = useMemo(() => {
-    const totals: Record<string, number> = {};
+  const summary = useMemo(() => {
+    const totals = new Map<string, { income: number; expense: number }>();
     for (const t of items) {
       const currency = t.wallet?.currency ?? "IDR";
-      totals[currency] = (totals[currency] ?? 0) + (t.type === "INCOME" ? t.amount : -t.amount);
+      const entry = totals.get(currency) ?? { income: 0, expense: 0 };
+      if (t.type === "INCOME") entry.income += t.amount;
+      else entry.expense += t.amount;
+      totals.set(currency, entry);
     }
-    return Object.entries(totals);
+    return [...totals.entries()].map(([currency, v]) => ({
+      currency,
+      income: v.income,
+      expense: v.expense,
+      net: v.income - v.expense,
+    }));
   }, [items]);
 
   return (
@@ -287,38 +324,128 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      <div className="app-surface grid gap-2 rounded-2xl p-2.5 sm:flex sm:flex-wrap sm:p-3">
-        <div className="relative sm:min-w-64 sm:flex-1">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input placeholder="Cari transaksi..." value={search} onChange={(e) => setSearch(e.target.value)} className="h-10 border-0 bg-muted/55 pl-9 shadow-none" />
+      <section aria-label="Filter transaksi" className="app-surface rounded-2xl p-3">
+        <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+          <div className="relative">
+            <Search
+              aria-hidden
+              className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              placeholder="Cari deskripsi transaksi…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void load();
+              }}
+              aria-label="Cari transaksi"
+              className="h-10 border-0 bg-muted/55 pl-9 shadow-none"
+            />
+          </div>
+          <div className="flex gap-2">
+            <Button
+              className="h-10 flex-1 cursor-pointer rounded-xl sm:flex-none"
+              onClick={() => void load()}
+            >
+              Terapkan
+            </Button>
+            {activeFilters > 0 && (
+              <Button
+                variant="outline"
+                className="h-10 cursor-pointer rounded-xl"
+                onClick={resetFilters}
+              >
+                <X className="size-3.5" strokeWidth={2.4} />
+                Reset
+              </Button>
+            )}
+          </div>
         </div>
-        <div className="grid grid-cols-[1fr_1.25fr_auto] gap-2">
-        <Select value={type} onValueChange={(v) => setType(v ?? "ALL")}>
-          <SelectTrigger className="h-10 w-full bg-card sm:w-36">
-            <SelectValue placeholder="Type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">Semua</SelectItem>
-            <SelectItem value="INCOME">Masuk</SelectItem>
-            <SelectItem value="EXPENSE">Keluar</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={walletFilter} onValueChange={(v) => setWalletFilter(v ?? "ALL")}>
-          <SelectTrigger className="h-10 w-full bg-card sm:w-44">
-            <SelectValue placeholder="Rekening" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">Semua rekening</SelectItem>
+
+        <div className="mt-2 grid gap-2 sm:grid-cols-4">
+          <select
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+            aria-label="Periode"
+            className="h-10 cursor-pointer rounded-xl border border-input bg-card px-3 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/60"
+          >
+            <option value="30">30 hari terakhir</option>
+            <option value="7">7 hari terakhir</option>
+            <option value="90">90 hari terakhir</option>
+            <option value="ALL">Semua waktu</option>
+          </select>
+
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            aria-label="Tipe transaksi"
+            className="h-10 cursor-pointer rounded-xl border border-input bg-card px-3 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/60"
+          >
+            <option value="ALL">Semua tipe</option>
+            <option value="INCOME">Masuk</option>
+            <option value="EXPENSE">Keluar</option>
+          </select>
+
+          <select
+            value={walletFilter}
+            onChange={(e) => setWalletFilter(e.target.value)}
+            aria-label="Rekening"
+            className="h-10 cursor-pointer rounded-xl border border-input bg-card px-3 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/60"
+          >
+            <option value="ALL">Semua rekening</option>
             {wallets.map((w) => (
-              <SelectItem key={w.id} value={w.id}>
+              <option key={w.id} value={w.id}>
                 {w.name} · {w.currency}
-              </SelectItem>
+              </option>
             ))}
-          </SelectContent>
-        </Select>
-        <Button className="h-10 rounded-xl" onClick={load}>Terapkan</Button>
+          </select>
+
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            aria-label="Kategori"
+            className="h-10 cursor-pointer rounded-xl border border-input bg-card px-3 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/60"
+          >
+            <option value="ALL">Semua kategori</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
         </div>
-      </div>
+      </section>
+
+      {/* Totals are per currency: rupiah and dollars are never summed together. */}
+      {summary.length > 0 && (
+        <section aria-label="Ringkasan hasil filter" className="grid gap-3 sm:grid-cols-3">
+          {summary.map((row) => (
+            <div key={row.currency} className="app-surface rounded-2xl p-4">
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
+                {row.currency}
+              </p>
+              <p
+                className={`tabular-money mt-1.5 text-lg font-bold tracking-[-0.02em] ${
+                  row.net < 0 ? "text-destructive" : "text-foreground"
+                }`}
+              >
+                {row.net >= 0 ? "+" : ""}
+                {formatCurrency(row.net, row.currency)}
+              </p>
+              <div className="mt-2 flex gap-4 text-[11px] text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <ArrowDownLeft aria-hidden className="size-3 text-emerald-600" strokeWidth={2.4} />
+                  {formatCurrency(row.income, row.currency)}
+                </span>
+                <span className="flex items-center gap-1">
+                  <ArrowUpRight aria-hidden className="size-3 text-amber-600" strokeWidth={2.4} />
+                  {formatCurrency(row.expense, row.currency)}
+                </span>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
 
       <div className="app-surface hidden overflow-hidden rounded-2xl md:block">
         <Table>
@@ -341,7 +468,20 @@ export default function TransactionsPage() {
             )}
             {!loading && items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7}>Belum ada transaksi.</TableCell>
+                <TableCell colSpan={7} className="py-10 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    {activeFilters > 0
+                      ? "Tidak ada transaksi yang cocok dengan filter."
+                      : "Belum ada transaksi."}
+                  </p>
+                  <Button
+                    variant="outline"
+                    className="mt-3 h-9 cursor-pointer rounded-xl"
+                    onClick={activeFilters > 0 ? resetFilters : openCreate}
+                  >
+                    {activeFilters > 0 ? "Reset filter" : "Tambah transaksi"}
+                  </Button>
+                </TableCell>
               </TableRow>
             )}
             {items.map((t) => (
@@ -378,7 +518,22 @@ export default function TransactionsPage() {
       </div>
       <div className="space-y-2.5 md:hidden">
         {loading && <div className="app-surface rounded-2xl p-4 text-xs text-muted-foreground">Memuat transaksi...</div>}
-        {!loading && items.length === 0 && <div className="app-surface rounded-2xl p-8 text-center text-xs text-muted-foreground">Belum ada transaksi.</div>}
+        {!loading && items.length === 0 && (
+          <div className="app-surface rounded-2xl p-8 text-center">
+            <p className="text-sm text-muted-foreground">
+              {activeFilters > 0
+                ? "Tidak ada transaksi yang cocok dengan filter."
+                : "Belum ada transaksi."}
+            </p>
+            <Button
+              variant="outline"
+              className="mt-3 h-10 cursor-pointer rounded-xl"
+              onClick={activeFilters > 0 ? resetFilters : openCreate}
+            >
+              {activeFilters > 0 ? "Reset filter" : "Tambah transaksi"}
+            </Button>
+          </div>
+        )}
         {items.map((transaction) => {
           const income = transaction.type === "INCOME";
           return (
@@ -401,11 +556,8 @@ export default function TransactionsPage() {
           );
         })}
       </div>
-      <p className="text-sm text-muted-foreground">
-        Net on page:{" "}
-        {netByCurrency.length === 0
-          ? "—"
-          : netByCurrency.map(([c, v]) => formatCurrency(v, c)).join(" · ")}
+      <p className="text-xs text-muted-foreground">
+        Menampilkan {items.length} transaksi{activeFilters > 0 ? " (terfilter)" : ""}.
       </p>
     </div>
   );

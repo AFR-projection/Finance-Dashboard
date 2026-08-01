@@ -21,7 +21,7 @@ export default function SetupPage() {
       .then((r) => r.json())
       .then((j) => {
         if (j.data?.isReady) {
-          router.replace("/access");
+          router.replace("/masuk");
           return;
         }
         if (j.data?.setupCompleted && !j.data?.isReady) {
@@ -51,7 +51,7 @@ export default function SetupPage() {
       return;
     }
     toast.success("Setup selesai. Lanjut minta akses via bot.");
-    router.push("/access");
+    router.push("/masuk");
   }
 
   if (loading) {

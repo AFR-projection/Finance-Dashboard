@@ -8,6 +8,9 @@ export async function GET(request: Request) {
       items: goals.map((g) => ({
         id: g.id,
         goalName: g.goalName,
+        walletId: g.walletId,
+        walletName: g.wallet.name,
+        walletCurrency: g.wallet.currency,
         targetAmount: Number(g.targetAmount),
         currentAmount: Number(g.currentAmount),
         deadline: g.deadline,

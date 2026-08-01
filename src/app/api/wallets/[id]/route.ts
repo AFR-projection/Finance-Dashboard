@@ -13,10 +13,18 @@ export async function PUT(request: Request, { params }: Params) {
   });
 }
 
+/**
+ * `?purge=1` removes the row entirely; the default only deactivates. Two verbs
+ * on one route because the UI offers both and the distinction matters: one is
+ * reversible, the other is not.
+ */
 export async function DELETE(request: Request, { params }: Params) {
   return withApiGuard(request, async (userId) => {
     const { id } = await params;
-    const data = await FinanceEngine.deleteWallet(userId, id);
+    const purge = new URL(request.url).searchParams.get("purge") === "1";
+    const data = purge
+      ? await FinanceEngine.purgeWallet(userId, id)
+      : await FinanceEngine.deleteWallet(userId, id);
     return jsonOk(data);
   });
 }

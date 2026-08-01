@@ -444,19 +444,21 @@ export async function analyzeBudget(userId: string, month?: number, year?: numbe
 
   const budgets = await prisma.budget.findMany({
     where: { userId, month: m, year: y },
-    include: { category: true },
+    include: { category: true, wallet: true },
   });
 
   const from = new Date(Date.UTC(y, m - 1, 1));
   const to = endOfMonth(from);
-  const { currency, where: walletFilter } = await primaryCurrencyWalletFilter(userId);
+  const { currency } = await primaryCurrencyWalletFilter(userId);
 
   const results = await Promise.all(
     budgets.map(async (b) => {
       const spentAgg = await prisma.transaction.aggregate({
         where: {
           userId,
-          ...walletFilter,
+          // Scoped to the budget's own account: spending rupiah must not count
+          // against a dollar limit, and vice versa.
+          walletId: b.walletId,
           type: "EXPENSE",
           categoryId: b.categoryId,
           transactionDate: { gte: from, lte: to },
@@ -471,6 +473,9 @@ export async function analyzeBudget(userId: string, month?: number, year?: numbe
         categoryId: b.categoryId,
         categoryName: b.category.name,
         color: b.category.color,
+        walletId: b.walletId,
+        walletName: b.wallet.name,
+        walletCurrency: b.wallet.currency,
         limit,
         spent,
         remaining: limit - spent,
@@ -487,14 +492,23 @@ export async function upsertBudget(userId: string, raw: unknown) {
   assertUser(userId);
   const input = createBudgetSchema.parse(raw);
   const now = new Date();
-  const month = input.month ?? now.getMonth() + 1;
-  const year = input.year ?? now.getFullYear();
+  const month = input.month ?? now.getUTCMonth() + 1;
+  const year = input.year ?? now.getUTCFullYear();
+
+  // Ownership check: without it, a crafted walletId could attach a budget to
+  // someone else's account.
+  const wallet = await prisma.wallet.findFirst({
+    where: { id: input.walletId, userId },
+    select: { id: true },
+  });
+  if (!wallet) throw new FinanceEngineError("Wallet not found", "WALLET_NOT_FOUND", 404);
 
   return prisma.budget.upsert({
     where: {
-      userId_categoryId_month_year: {
+      userId_categoryId_walletId_month_year: {
         userId,
         categoryId: input.categoryId,
+        walletId: input.walletId,
         month,
         year,
       },
@@ -503,25 +517,42 @@ export async function upsertBudget(userId: string, raw: unknown) {
     create: {
       userId,
       categoryId: input.categoryId,
+      walletId: input.walletId,
       monthlyLimit: new Prisma.Decimal(input.monthlyLimit),
       month,
       year,
     },
-    include: { category: true },
+    include: { category: true, wallet: true },
   });
+}
+
+export async function deleteBudget(userId: string, id: string) {
+  assertUser(userId);
+  const existing = await prisma.budget.findFirst({ where: { id, userId }, select: { id: true } });
+  if (!existing) throw new FinanceEngineError("Budget not found", "BUDGET_NOT_FOUND", 404);
+  await prisma.budget.delete({ where: { id } });
+  return { id };
 }
 
 export async function createGoal(userId: string, raw: unknown) {
   assertUser(userId);
   const input = createGoalSchema.parse(raw);
+  const wallet = await prisma.wallet.findFirst({
+    where: { id: input.walletId, userId },
+    select: { id: true },
+  });
+  if (!wallet) throw new FinanceEngineError("Wallet not found", "WALLET_NOT_FOUND", 404);
+
   return prisma.financialGoal.create({
     data: {
       userId,
       goalName: input.goalName,
+      walletId: input.walletId,
       targetAmount: new Prisma.Decimal(input.targetAmount),
       currentAmount: new Prisma.Decimal(input.currentAmount),
       deadline: input.deadline ?? null,
     },
+    include: { wallet: true },
   });
 }
 
@@ -530,6 +561,7 @@ export async function listGoals(userId: string) {
   return prisma.financialGoal.findMany({
     where: { userId },
     orderBy: { createdAt: "desc" },
+    include: { wallet: { select: { name: true, currency: true, color: true } } },
   });
 }
 
@@ -810,6 +842,36 @@ export async function deleteWallet(userId: string, id: string) {
   return { id };
 }
 
+/**
+ * Removes a wallet for good.
+ *
+ * Refused while transactions still reference it: the ledger is the record of
+ * what actually happened, and deleting the account would either orphan those
+ * rows or quietly rewrite history. Deactivation stays the answer for wallets
+ * that hold real activity.
+ */
+export async function purgeWallet(userId: string, id: string) {
+  assertUser(userId);
+  const existing = await prisma.wallet.findFirst({
+    where: { id, userId },
+    select: { id: true, name: true, _count: { select: { transactions: true } } },
+  });
+  if (!existing) throw new FinanceEngineError("Wallet not found", "WALLET_NOT_FOUND", 404);
+
+  if (existing._count.transactions > 0) {
+    throw new FinanceEngineError(
+      `Rekening "${existing.name}" masih punya ${existing._count.transactions} transaksi. ` +
+        `Hapus atau pindahkan transaksinya dulu, atau nonaktifkan saja rekeningnya.`,
+      "WALLET_HAS_TRANSACTIONS",
+      409,
+    );
+  }
+
+  // Budgets and goals cascade by schema — they are settings, not history.
+  await prisma.wallet.delete({ where: { id } });
+  return { id };
+}
+
 function serializeTransaction(
   tx: Prisma.TransactionGetPayload<{ include: { category: true; wallet: true } }>,
 ) {
@@ -859,5 +921,7 @@ export const FinanceEngine = {
   listWallets,
   getFinancialSnapshot,
   updateWallet,
+  deleteBudget,
   deleteWallet,
+  purgeWallet,
 };

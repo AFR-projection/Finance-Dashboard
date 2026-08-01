@@ -266,6 +266,8 @@ model Wallet {
 
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions Transaction[]
+  budgets      Budget[]
+  goals        FinancialGoal[]
 
   @@unique([userId, name])
   @@index([userId])
@@ -304,6 +306,9 @@ model Budget {
   id           String   @id @default(cuid())
   userId       String   @map("user_id")
   categoryId   String   @map("category_id")
+  /// Which account this budget is drawn from. Required, because a limit in one
+  /// currency says nothing useful when spending happens across several.
+  walletId     String   @map("wallet_id")
   monthlyLimit Decimal  @map("monthly_limit") @db.Decimal(18, 2)
   month        Int
   year         Int
@@ -312,8 +317,9 @@ model Budget {
 
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  wallet   Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, categoryId, month, year])
+  @@unique([userId, categoryId, walletId, month, year])
   @@index([userId, year, month])
   @@map("budgets")
 }
@@ -322,13 +328,17 @@ model FinancialGoal {
   id            String    @id @default(cuid())
   userId        String    @map("user_id")
   goalName      String    @map("goal_name")
+  /// Where the money is being saved. Required so a target amount always has a
+  /// currency, and progress can be read against a real balance.
+  walletId      String    @map("wallet_id")
   targetAmount  Decimal   @map("target_amount") @db.Decimal(18, 2)
   currentAmount Decimal   @default(0) @map("current_amount") @db.Decimal(18, 2)
   deadline      DateTime?
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@map("financial_goals")

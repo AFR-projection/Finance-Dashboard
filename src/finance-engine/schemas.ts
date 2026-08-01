@@ -33,6 +33,8 @@ export const listTransactionsSchema = z.object({
 
 export const createBudgetSchema = z.object({
   categoryId: z.string().cuid(),
+  /** Required: a limit without an account has no currency to be measured in. */
+  walletId: z.string().cuid(),
   monthlyLimit: z.coerce.number().positive(),
   month: z.coerce.number().int().min(1).max(12).optional(),
   year: z.coerce.number().int().min(2000).max(2100).optional(),
@@ -40,6 +42,7 @@ export const createBudgetSchema = z.object({
 
 export const createGoalSchema = z.object({
   goalName: z.string().min(1).max(120),
+  walletId: z.string().cuid(),
   targetAmount: z.coerce.number().positive(),
   currentAmount: z.coerce.number().min(0).default(0),
   deadline: z.coerce.date().optional().nullable(),
