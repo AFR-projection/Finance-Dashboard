@@ -7,6 +7,8 @@
 
 import pino from "pino";
 import { FinanceEngine } from "@/finance-engine";
+import { sendTelegramDocument } from "@/lib/app-config";
+import { prisma } from "@/lib/db";
 import { notifyLinkedChannels } from "@/lib/notify-channels";
 import { sendWebPush } from "@/lib/push";
 import type { HeartbeatAnalysis } from "./analyst";
@@ -25,8 +27,10 @@ export async function dispatchHeartbeat(params: {
   userId: string;
   periodKey: string;
   analysis: HeartbeatAnalysis;
-}): Promise<{ saved: boolean; telegram: number; push: number }> {
-  const { userId, periodKey, analysis } = params;
+  /** Attached to the Telegram message when a monthly recap is due. */
+  attachment?: { filename: string; content: string; caption: string };
+}): Promise<{ saved: boolean; telegram: number; push: number; document: boolean }> {
+  const { userId, periodKey, analysis, attachment } = params;
 
   await FinanceEngine.saveAiInsights(userId, periodKey, [
     {
@@ -39,9 +43,12 @@ export async function dispatchHeartbeat(params: {
     },
   ]);
 
-  if (!analysis.shouldSend) {
+  // A monthly recap is a deliverable, not an interruption: the spreadsheet goes
+  // out even when the analyst judged there was nothing alarming to say.
+  const mustSend = analysis.shouldSend || Boolean(attachment);
+  if (!mustSend) {
     log.info({ userId, periodKey }, "Heartbeat disimpan tanpa notifikasi (tidak ada yang penting)");
-    return { saved: true, telegram: 0, push: 0 };
+    return { saved: true, telegram: 0, push: 0, document: false };
   }
 
   const [telegram, push] = await Promise.all([
@@ -60,9 +67,28 @@ export async function dispatchHeartbeat(params: {
     }),
   ]);
 
+  let document = false;
+  if (attachment) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { telegramChatId: true },
+    });
+    if (user?.telegramChatId) {
+      const sent = await sendTelegramDocument(
+        user.telegramChatId,
+        { filename: attachment.filename, content: attachment.content },
+        attachment.caption,
+      ).catch((err) => {
+        log.warn({ err, userId }, "Heartbeat lampiran gagal");
+        return { delivered: false };
+      });
+      document = sent.delivered;
+    }
+  }
+
   log.info(
-    { userId, periodKey, telegram: telegram.length, push: push.sent },
+    { userId, periodKey, telegram: telegram.length, push: push.sent, document },
     "Heartbeat terkirim",
   );
-  return { saved: true, telegram: telegram.length, push: push.sent };
+  return { saved: true, telegram: telegram.length, push: push.sent, document };
 }

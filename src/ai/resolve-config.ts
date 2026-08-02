@@ -19,6 +19,12 @@ export async function resolveAiConfig(_userId?: string): Promise<AiRuntimeConfig
     try {
       apiKey = decryptSecret(cfg.openrouterApiKey);
     } catch {
+      // A stored key that will not decrypt means ENCRYPTION_KEY changed since
+      // it was saved. Silence here looked identical to "no key configured" and
+      // sent the whole platform's AI offline without a clue why.
+      console.error(
+        "[ai] Gagal mendekripsi OpenRouter API key. ENCRYPTION_KEY kemungkinan berbeda dari saat key disimpan — simpan ulang key di panel admin (/ai).",
+      );
       apiKey = "";
     }
   }

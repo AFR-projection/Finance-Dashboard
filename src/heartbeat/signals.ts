@@ -30,7 +30,7 @@ export type HeartbeatSnapshot = {
   currency: string;
   timezone: string;
   localDate: string;
-  cadence: "daily" | "weekly";
+  cadence: "daily" | "weekly" | "monthly";
   signals: Signal[];
   wallets: Array<{ name: string; currency: string; balance: number }>;
   monthToDate: {
@@ -56,7 +56,7 @@ function money(value: number): number {
 
 export async function collectSnapshot(
   userId: string,
-  cadence: "daily" | "weekly",
+  cadence: "daily" | "weekly" | "monthly",
 ): Promise<HeartbeatSnapshot> {
   const [settings, wallets, budgetReport, prediction, cashflow, goals, recentInsights, lastTx] =
     await Promise.all([
@@ -253,7 +253,7 @@ export async function collectSnapshot(
   }
 
   const lastWeek = await (async () => {
-    if (cadence !== "weekly") return null;
+    if (cadence === "daily") return null;
     const from = daysAgo(7);
     const txs = await prisma.transaction.findMany({
       where: { userId, transactionDate: { gte: from } },

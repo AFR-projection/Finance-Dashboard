@@ -25,10 +25,18 @@ const DAILY_BRIEF = `Tugasmu: brief pagi. Angkat maksimal 2 hal paling penting h
 
 const WEEKLY_BRIEF = `Tugasmu: rekap Senin. Ringkas pekan lalu (pemasukan, pengeluaran, apa yang berubah), lalu rencana pekan ini, lalu status goal. Tetap padat.`;
 
-function systemPrompt(cadence: "daily" | "weekly"): string {
+const MONTHLY_BRIEF = `Tugasmu: laporan tutup bulan. Ringkas bulan yang baru selesai — total masuk, total keluar, kategori terbesar, dan apakah membaik atau memburuk dibanding bulan sebelumnya. Tutup dengan satu fokus untuk bulan ini. File rekap transaksi dikirim terpisah sebagai lampiran, jadi jangan bilang kamu melampirkannya di teks.`;
+
+const BRIEFS: Record<"daily" | "weekly" | "monthly", string> = {
+  daily: DAILY_BRIEF,
+  weekly: WEEKLY_BRIEF,
+  monthly: MONTHLY_BRIEF,
+};
+
+function systemPrompt(cadence: "daily" | "weekly" | "monthly"): string {
   return `Kamu Ledgerly, chief of staff keuangan pribadi user. Kamu sedang menulis pesan proaktif — user tidak bertanya apa pun, jadi pesan ini harus benar-benar layak mengganggu mereka.
 
-${cadence === "weekly" ? WEEKLY_BRIEF : DAILY_BRIEF}
+${BRIEFS[cadence]}
 
 ATURAN ANGKA
 - Hanya boleh memakai angka yang ada di data. Jangan menghitung ulang, jangan menaksir, jangan mengarang persentase.
@@ -37,6 +45,7 @@ ATURAN ANGKA
 
 ATURAN KIRIM
 - shouldSend=false kalau tidak ada yang benar-benar penting: tidak ada sinyal berarti, atau isinya cuma mengulang recentInsightTitles.
+- Khusus cadence "monthly": shouldSend selalu true. Laporan tutup bulan adalah kiriman rutin yang memang diminta user, bukan gangguan.
 - Jangan kirim peringatan yang sama dua hari berturut-turut dengan kalimat yang sama.
 - Kalau kondisi keuangannya sehat, sesekali boleh kirim kabar baik — tapi jangan tiap hari.
 
@@ -98,7 +107,9 @@ export async function analyzeHeartbeat(params: {
 }): Promise<HeartbeatAnalysis | null> {
   const { snapshot, config } = params;
   if (!config.apiKey) {
-    log.warn("Heartbeat dilewati: API key AI belum dikonfigurasi");
+    log.warn(
+      "Heartbeat dilewati: API key AI tidak tersedia. Cek panel admin /ai — kalau key sudah diisi, kemungkinan ENCRYPTION_KEY berubah sehingga key lama tidak bisa dibaca.",
+    );
     return null;
   }
 

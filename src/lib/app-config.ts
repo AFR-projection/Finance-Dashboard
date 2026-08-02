@@ -229,6 +229,36 @@ export async function notifyOwner(
   return sendTelegramMessage(cfg.telegramOwnerChatId, message, options);
 }
 
+/**
+ * Uploads a file to a chat. Used for the monthly CSV recap — a spreadsheet is
+ * far more useful as an attachment than as thousands of characters of text.
+ */
+export async function sendTelegramDocument(
+  chatId: string,
+  file: { filename: string; content: string; mimeType?: string },
+  caption?: string,
+): Promise<TelegramSendResult> {
+  const cfg = await getAppConfigRaw();
+  if (!cfg.telegramBotToken || !chatId) return { delivered: false };
+
+  const form = new FormData();
+  form.append("chat_id", chatId);
+  form.append(
+    "document",
+    new Blob([file.content], { type: file.mimeType ?? "text/csv" }),
+    file.filename,
+  );
+  if (caption) form.append("caption", caption.slice(0, 1024));
+
+  const response = await fetch(
+    `https://api.telegram.org/bot${cfg.telegramBotToken}/sendDocument`,
+    { method: "POST", body: form },
+  );
+
+  if (response.ok) return { delivered: true };
+  return { delivered: false, needsStart: response.status === 403 };
+}
+
 /** Deep links need the @handle, and it is only discoverable from the token. */
 export async function getBotUsername(): Promise<string | null> {
   const cfg = await getAppConfigRaw();

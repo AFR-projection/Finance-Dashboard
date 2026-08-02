@@ -264,6 +264,49 @@ export const agentTools = [
       },
     },
   },
+  {
+    name: "exportTransactions",
+    description:
+      "Send the user a spreadsheet (CSV, opens in Excel) of their transactions for a period, delivered to Telegram as a file attachment. Use when the user asks to export, download, or receive a report/rekap file. On the web channel the file cannot be delivered — say so and offer the Telegram bot instead.",
+    parameters: {
+      type: "object",
+      properties: {
+        period: {
+          type: "string",
+          enum: ["this_month", "last_month", "last_30_days", "last_90_days", "this_year", "custom"],
+          description: "Which range to export (default this_month)",
+        },
+        from: { type: "string", description: "Start date YYYY-MM-DD, only when period=custom" },
+        to: { type: "string", description: "End date YYYY-MM-DD, only when period=custom" },
+      },
+    },
+  },
+  {
+    name: "detectRecurring",
+    description:
+      "Find subscriptions and repeating charges by matching similar descriptions and amounts across months. Reports how much each one costs per month, when it was last seen, and flags ones that look forgotten (nothing charged recently or unusually long gaps).",
+    parameters: {
+      type: "object",
+      properties: {
+        months: { type: "number", description: "History window in months (default 6)" },
+      },
+    },
+  },
+  {
+    name: "projectBalance",
+    description:
+      "Project when an account runs out of money at the current burn rate. Returns days of runway and the projected date per wallet. Use for questions like 'uang saya cukup sampai kapan' or before the user commits to a big purchase.",
+    parameters: {
+      type: "object",
+      properties: {
+        walletId: { type: "string", description: "Limit to one account; omit for all" },
+        plannedExpense: {
+          type: "number",
+          description: "Optional purchase to subtract first, to test if it is affordable",
+        },
+      },
+    },
+  },
 ] as const;
 
 export type AgentToolName = (typeof agentTools)[number]["name"];

@@ -9,6 +9,7 @@
 import pino from "pino";
 import { resolveAiConfig } from "@/ai/resolve-config";
 import { requireAiAccess } from "@/ai/entitlement";
+import { exportTransactionsCsv } from "@/finance-engine/export";
 import { prisma } from "@/lib/db";
 import { analyzeHeartbeat } from "./analyst";
 import { dispatchHeartbeat } from "./dispatch";
@@ -16,9 +17,9 @@ import { collectSnapshot } from "./signals";
 
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 
-export type Cadence = "daily" | "weekly";
+export type Cadence = "daily" | "weekly" | "monthly";
 
-type LocalClock = { hour: number; isoDate: string; weekday: number };
+type LocalClock = { hour: number; isoDate: string; weekday: number; dayOfMonth: number };
 
 function localClock(timezone: string, at: Date): LocalClock {
   const tz = timezone || "Asia/Jakarta";
@@ -27,10 +28,12 @@ function localClock(timezone: string, at: Date): LocalClock {
     hour: "2-digit",
     hour12: false,
     weekday: "short",
+    day: "2-digit",
   }).formatToParts(at);
 
   const hourPart = parts.find((p) => p.type === "hour")?.value ?? "0";
   const weekdayPart = parts.find((p) => p.type === "weekday")?.value ?? "Mon";
+  const dayPart = parts.find((p) => p.type === "day")?.value ?? "1";
   const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   return {
@@ -38,6 +41,7 @@ function localClock(timezone: string, at: Date): LocalClock {
     hour: Number(hourPart) % 24,
     isoDate: at.toLocaleDateString("sv-SE", { timeZone: tz }),
     weekday: Math.max(0, weekdays.indexOf(weekdayPart)),
+    dayOfMonth: Number(dayPart),
   };
 }
 
@@ -51,19 +55,36 @@ export function isoWeekKey(isoDate: string): string {
   return `${date.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
+/** Month key for the recap, e.g. 2026-07 — always the month that just closed. */
+export function previousMonthKey(isoDate: string): string {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  date.setUTCDate(0); // day 0 of this month = last day of the previous one
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 export function periodKeyFor(cadence: Cadence, isoDate: string): string {
+  if (cadence === "monthly") return `monthly:${previousMonthKey(isoDate)}`;
   return cadence === "weekly" ? `weekly:${isoWeekKey(isoDate)}` : `daily:${isoDate}`;
 }
 
 /**
- * The weekly recap replaces the daily brief on Monday instead of stacking on
- * top of it — two notifications in one morning is noise, not guidance.
+ * Whether a user is due, given their local clock.
+ *
+ * The window opens at the configured hour and stays open for the rest of the
+ * day. An exact `hour === target` match looked tidy but meant a worker restart,
+ * a sleeping laptop, or one slow database tick silently skipped that day
+ * forever — the reason heartbeat had never fired in production. Duplicates are
+ * prevented by the period key, not by the narrowness of this window.
+ *
+ * Priority is monthly > weekly > daily: on the 1st, the recap replaces the
+ * brief rather than arriving alongside it.
  */
 export function dueCadence(params: {
   clock: LocalClock;
   heartbeatHour: number;
 }): Cadence | null {
-  if (params.clock.hour !== params.heartbeatHour) return null;
+  if (params.clock.hour < params.heartbeatHour) return null;
+  if (params.clock.dayOfMonth === 1) return "monthly";
   return params.clock.weekday === 1 ? "weekly" : "daily";
 }
 
@@ -89,8 +110,45 @@ export async function runHeartbeatForUser(params: {
 
   if (!analysis) return "skipped";
 
-  const result = await dispatchHeartbeat({ userId, periodKey, analysis });
-  return result.telegram + result.push > 0 ? "sent" : "saved";
+  const attachment = cadence === "monthly" ? await buildMonthlyRecap(userId, periodKey) : undefined;
+  const result = await dispatchHeartbeat({ userId, periodKey, analysis, attachment });
+  return result.telegram + result.push + (result.document ? 1 : 0) > 0 ? "sent" : "saved";
+}
+
+/**
+ * Spreadsheet of the month that just closed.
+ *
+ * Skipped when the month had no activity — an empty file is noise, and the
+ * analyst's text alone already says nothing happened.
+ */
+async function buildMonthlyRecap(userId: string, periodKey: string) {
+  const monthKey = periodKey.replace("monthly:", "");
+  const [year, month] = monthKey.split("-").map(Number);
+  if (!year || !month) return undefined;
+
+  const from = new Date(Date.UTC(year, month - 1, 1));
+  const to = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+
+  const exported = await exportTransactionsCsv(userId, from, to, monthKey);
+  if (exported.rowCount === 0) return undefined;
+
+  const monthName = from.toLocaleDateString("id-ID", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  const summary = exported.totals
+    .map(
+      (t) =>
+        `${t.currency}: masuk ${t.income.toLocaleString("id-ID")}, keluar ${t.expense.toLocaleString("id-ID")}`,
+    )
+    .join(" | ");
+
+  return {
+    filename: exported.filename,
+    content: exported.csv,
+    caption: `📊 Rekap ${monthName} — ${exported.rowCount} transaksi\n${summary}`,
+  };
 }
 
 /** One scheduler tick: finds users whose local clock just hit their heartbeat hour. */

@@ -1,5 +1,8 @@
 import { FinanceEngine } from "@/finance-engine";
-import { daysAgo } from "@/lib/utils";
+import { exportTransactionsCsv } from "@/finance-engine/export";
+import { sendTelegramDocument } from "@/lib/app-config";
+import { prisma } from "@/lib/db";
+import { daysAgo, toNumber } from "@/lib/utils";
 import { createPendingTransaction } from "@/messaging/pending-transaction";
 import { recordedTransactionText } from "@/messaging/wallet-choice";
 import {
@@ -8,6 +11,7 @@ import {
   type WalletPromptToolResult,
 } from "@/messaging/wallet-prompt";
 import { resolveTransactionWallet } from "@/messaging/wallet-resolution";
+import { detectRecurringCharges, resolveExportRange } from "./recurring";
 import { CLIENT_MESSAGE_MARKER, VERIFIED_MUTATION_MARKER } from "./tool-result";
 import type { AgentToolName } from "./tools";
 
@@ -736,6 +740,128 @@ export async function executeTool(
           totalProposedLimit: proposals.reduce((sum, p) => sum + p.proposedLimit, 0),
           totalAvgMonthly: proposals.reduce((sum, p) => sum + p.avgMonthly, 0),
           note: "USULAN saja — belum ada yang disimpan. Tunjukkan ke user, minta persetujuan, lalu simpan tiap pagu yang disetujui lewat manageBudget.",
+        };
+      }
+
+      case "exportTransactions": {
+        const { from, to, label } = resolveExportRange(
+          String(args.period ?? "this_month"),
+          args.from ? String(args.from) : undefined,
+          args.to ? String(args.to) : undefined,
+        );
+        const exported = await exportTransactionsCsv(userId, from, to, label);
+
+        if (exported.rowCount === 0) {
+          return {
+            status: "EMPTY",
+            [CLIENT_MESSAGE_MARKER]: `Tidak ada transaksi pada periode ${label}, jadi tidak ada yang bisa diekspor.`,
+            note: "Jangan kirim file kosong. Sampaikan tidak ada data di periode itu.",
+          };
+        }
+
+        // Files can only be delivered where the channel supports attachments.
+        // Claiming success on the web would be a lie the user cannot verify.
+        if (channel !== "TELEGRAM") {
+          return {
+            status: "CHANNEL_UNSUPPORTED",
+            rowCount: exported.rowCount,
+            totals: exported.totals,
+            [CLIENT_MESSAGE_MARKER]:
+              `Ringkasan ${label}: ${exported.rowCount} transaksi. File CSV hanya bisa dikirim lewat bot Telegram — minta lewat sana untuk menerima filenya.`,
+            note: "File tidak terkirim di channel ini. Jangan bilang file sudah dikirim.",
+          };
+        }
+
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { telegramChatId: true },
+        });
+        if (!user?.telegramChatId) {
+          return {
+            status: "NO_TELEGRAM",
+            [CLIENT_MESSAGE_MARKER]: "Telegram belum tertaut, jadi file tidak bisa dikirim.",
+            note: "Jangan klaim file terkirim.",
+          };
+        }
+
+        const summary = exported.totals
+          .map((t) => `${t.currency}: masuk ${t.income.toLocaleString("id-ID")}, keluar ${t.expense.toLocaleString("id-ID")}`)
+          .join(" | ");
+        const sent = await sendTelegramDocument(
+          user.telegramChatId,
+          { filename: exported.filename, content: exported.csv },
+          `📊 Rekap ${label} — ${exported.rowCount} transaksi\n${summary}`,
+        );
+
+        if (!sent.delivered) {
+          return {
+            status: "SEND_FAILED",
+            [CLIENT_MESSAGE_MARKER]: "Gagal mengirim file ke Telegram. Coba lagi sebentar lagi.",
+            note: "Jangan klaim file terkirim.",
+          };
+        }
+
+        return {
+          status: "SENT",
+          rowCount: exported.rowCount,
+          totals: exported.totals,
+          [CLIENT_MESSAGE_MARKER]: `📊 File rekap ${label} sudah dikirim (${exported.rowCount} transaksi).`,
+        };
+      }
+
+      case "detectRecurring": {
+        const months = Math.max(1, Math.min(24, Number(args.months ?? 6)));
+        const result = await FinanceEngine.getTransactions(userId, {
+          from: daysAgo(months * 30),
+          type: "EXPENSE",
+          limit: 1000,
+        });
+        return detectRecurringCharges(result.items, months);
+      }
+
+      case "projectBalance": {
+        const wallets = await FinanceEngine.listWallets(userId);
+        const scoped = args.walletId
+          ? wallets.filter((w) => w.id === String(args.walletId))
+          : wallets;
+        if (scoped.length === 0) {
+          return { status: "NO_WALLET", note: "Tidak ada rekening yang cocok." };
+        }
+
+        const since = daysAgo(90);
+        const spend = await prisma.transaction.groupBy({
+          by: ["walletId"],
+          where: { userId, type: "EXPENSE", transactionDate: { gte: since } },
+          _sum: { amount: true },
+        });
+        const planned = Number(args.plannedExpense ?? 0);
+
+        return {
+          basis: "Rata-rata pengeluaran 90 hari terakhir per rekening.",
+          plannedExpense: planned > 0 ? planned : undefined,
+          wallets: scoped.map((wallet) => {
+            const spent = toNumber(
+              spend.find((s) => s.walletId === wallet.id)?._sum.amount ?? 0,
+            );
+            const perDay = spent / 90;
+            const balance = wallet.balance - (planned > 0 ? planned : 0);
+            // Zero burn means runway is not a meaningful number, not infinity.
+            const runwayDays = perDay > 0 ? Math.floor(balance / perDay) : null;
+            const runsOutOn =
+              runwayDays !== null && runwayDays >= 0
+                ? new Date(Date.now() + runwayDays * 86_400_000).toISOString().slice(0, 10)
+                : null;
+            return {
+              wallet: wallet.name,
+              currency: wallet.currency,
+              balance: wallet.balance,
+              balanceAfterPlanned: planned > 0 ? balance : undefined,
+              avgDailySpend: Math.round(perDay * 100) / 100,
+              runwayDays,
+              runsOutOn,
+              affordable: planned > 0 ? wallet.balance >= planned : undefined,
+            };
+          }),
         };
       }
 

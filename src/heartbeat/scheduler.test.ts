@@ -18,17 +18,30 @@ describe("heartbeat scheduling", () => {
     expect(localClock("UTC", at).isoDate).toBe("2026-07-30");
   });
 
-  it("fires only on the configured hour", () => {
-    const clock = { hour: 7, isoDate: "2026-07-31", weekday: 5 };
+  it("waits until the configured hour, then stays due for the rest of the day", () => {
+    const clock = { hour: 7, isoDate: "2026-07-31", weekday: 5, dayOfMonth: 31 };
 
     expect(dueCadence({ clock, heartbeatHour: 7 })).toBe("daily");
     expect(dueCadence({ clock, heartbeatHour: 8 })).toBeNull();
   });
 
+  // The old `hour === target` window meant one missed tick lost the whole day.
+  it("still fires when the worker was down at the exact hour", () => {
+    const late = { hour: 15, isoDate: "2026-07-31", weekday: 5, dayOfMonth: 31 };
+
+    expect(dueCadence({ clock: late, heartbeatHour: 7 })).toBe("daily");
+  });
+
   it("replaces Monday's daily brief with the weekly recap", () => {
-    const monday = { hour: 7, isoDate: "2026-08-03", weekday: 1 };
+    const monday = { hour: 7, isoDate: "2026-08-03", weekday: 1, dayOfMonth: 3 };
 
     expect(dueCadence({ clock: monday, heartbeatHour: 7 })).toBe("weekly");
+  });
+
+  it("sends the monthly recap on the 1st, outranking daily and weekly", () => {
+    const firstOfMonth = { hour: 7, isoDate: "2026-09-01", weekday: 2, dayOfMonth: 1 };
+
+    expect(dueCadence({ clock: firstOfMonth, heartbeatHour: 7 })).toBe("monthly");
   });
 
   it("keeps daily and weekly period keys distinct so neither blocks the other", () => {
