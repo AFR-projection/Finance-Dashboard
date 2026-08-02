@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { EyeOff, Pencil, Plus, Star, Trash2, WalletCards } from "lucide-react";
+import { EyeOff, Pencil, Plus, RotateCcw, Star, Trash2, WalletCards } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -177,7 +177,9 @@ export default function WalletsPage() {
 
   async function load() {
     setLoading(true);
-    const res = await fetch("/api/wallets");
+    // `all=1`: deactivated wallets must stay visible here so they can be
+    // reactivated or purged.
+    const res = await fetch("/api/wallets?all=1");
     const json = (await res.json()) as { data?: Wallet[] };
     setWallets(json.data ?? []);
     setLoading(false);
@@ -190,26 +192,66 @@ export default function WalletsPage() {
 
   async function handleCreate(data: WalletFormData) {
     setSubmitting(true);
-    await fetch("/api/wallets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    setAddOpen(false);
-    setSubmitting(false);
-    void load();
+    try {
+      const res = await fetch("/api/wallets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      const json = await res.json();
+      // Without this the dialog just closed on failure and the wallet appeared
+      // to vanish — the original bug report.
+      if (!json.ok) {
+        toast.error(json.error?.message ?? "Gagal membuat rekening");
+        return;
+      }
+      toast.success(`Rekening "${data.name}" dibuat`);
+      setAddOpen(false);
+      void load();
+    } catch {
+      toast.error("Gagal terhubung ke server");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function handleUpdate(data: WalletFormData) {
     if (!editTarget) return;
     setSubmitting(true);
-    await fetch(`/api/wallets/${editTarget.id}`, {
+    try {
+      const res = await fetch(`/api/wallets/${editTarget.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        toast.error(json.error?.message ?? "Gagal menyimpan perubahan");
+        return;
+      }
+      toast.success("Rekening diperbarui");
+      setEditTarget(null);
+      void load();
+    } catch {
+      toast.error("Gagal terhubung ke server");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  /** Brings a deactivated wallet back into use. */
+  async function handleReactivate(wallet: Wallet) {
+    const res = await fetch(`/api/wallets/${wallet.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
+      body: JSON.stringify({ isActive: true }),
     });
-    setEditTarget(null);
-    setSubmitting(false);
+    const json = await res.json();
+    if (!json.ok) {
+      toast.error(json.error?.message ?? "Gagal mengaktifkan");
+      return;
+    }
+    toast.success(`"${wallet.name}" aktif kembali`);
     void load();
   }
 
@@ -315,15 +357,26 @@ export default function WalletsPage() {
                 Nonaktifkan
               </Button>
             ) : (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="cursor-pointer rounded-lg text-destructive hover:text-destructive"
-                onClick={() => void handlePurge(wallet)}
-              >
-                <Trash2 className="mr-1 size-3.5" />
-                Hapus permanen
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="cursor-pointer rounded-lg text-primary hover:text-primary"
+                  onClick={() => void handleReactivate(wallet)}
+                >
+                  <RotateCcw className="mr-1 size-3.5" />
+                  Aktifkan
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="cursor-pointer rounded-lg text-destructive hover:text-destructive"
+                  onClick={() => void handlePurge(wallet)}
+                >
+                  <Trash2 className="mr-1 size-3.5" />
+                  Hapus
+                </Button>
+              </>
             )}
           </div>
         </div>

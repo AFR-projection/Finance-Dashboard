@@ -4,7 +4,10 @@ import { jsonOk, withApiGuard } from "@/lib/api";
 
 export async function GET(request: Request) {
   return withApiGuard(request, async (userId) => {
-    const data = await FinanceEngine.listWallets(userId);
+    // The accounts page asks for everything so deactivated wallets stay
+    // visible and reactivatable; other callers get active ones only.
+    const includeInactive = new URL(request.url).searchParams.get("all") === "1";
+    const data = await FinanceEngine.listWallets(userId, { includeInactive });
     return jsonOk(data);
   });
 }

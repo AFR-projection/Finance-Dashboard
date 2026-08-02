@@ -12,7 +12,11 @@ import {
   type WalletPrompt,
 } from "../../src/messaging/wallet-choice";
 
-type AgentReplyPayload = { text: string; walletPrompt?: WalletPrompt };
+type AgentReplyPayload = {
+  text: string;
+  walletPrompt?: WalletPrompt;
+  walletPrompts?: WalletPrompt[];
+};
 
 loadEnvConfig(process.cwd());
 
@@ -105,13 +109,18 @@ async function main() {
 
   async function replyAgent(ctx: Context, reply: AgentReplyPayload) {
     const chunks = splitForChannel(formatForChannel(reply.text), 3500);
-    for (let i = 0; i < chunks.length; i++) {
-      const isLast = i === chunks.length - 1;
-      await ctx.reply(chunks[i], {
+    for (const chunk of chunks) {
+      await ctx.reply(chunk, { parse_mode: "HTML" });
+    }
+
+    // One message per pending draft. A batch of three expenses produces three
+    // keyboards; attaching only the last one left the earlier drafts stranded
+    // with no way for the user to pick an account.
+    const prompts = reply.walletPrompts ?? (reply.walletPrompt ? [reply.walletPrompt] : []);
+    for (const prompt of prompts) {
+      await ctx.reply(formatForChannel(prompt.question), {
         parse_mode: "HTML",
-        ...(isLast && reply.walletPrompt
-          ? { reply_markup: walletKeyboard(reply.walletPrompt) }
-          : {}),
+        reply_markup: walletKeyboard(prompt),
       });
     }
   }

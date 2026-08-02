@@ -709,6 +709,23 @@ export async function createWallet(userId: string, raw: CreateWalletInput) {
   assertUser(userId);
   const input = createWalletSchema.parse(raw);
 
+  // Names are unique per user regardless of status, so a deactivated wallet
+  // silently blocks its own name. Saying so beats a raw constraint error, and
+  // the caller gets the id it needs to offer "reactivate" instead.
+  const clash = await prisma.wallet.findFirst({
+    where: { userId, name: input.name },
+    select: { id: true, isActive: true },
+  });
+  if (clash) {
+    throw new FinanceEngineError(
+      clash.isActive
+        ? `Rekening "${input.name}" sudah ada.`
+        : `Rekening "${input.name}" pernah dibuat dan sedang nonaktif. Aktifkan kembali dari daftar rekening nonaktif, atau pakai nama lain.`,
+      clash.isActive ? "WALLET_NAME_TAKEN" : "WALLET_NAME_INACTIVE",
+      409,
+    );
+  }
+
   if (input.isDefault) {
     await prisma.wallet.updateMany({ where: { userId, isDefault: true }, data: { isDefault: false } });
   }
@@ -736,11 +753,18 @@ export async function createWallet(userId: string, raw: CreateWalletInput) {
   return wallet;
 }
 
-export async function listWallets(userId: string) {
+/**
+ * Wallet balances for a user.
+ *
+ * `includeInactive` exists for the accounts screen, which must show deactivated
+ * wallets so they can be reactivated or deleted. Everywhere else — the agent,
+ * heartbeat, pickers — wants only usable accounts, so that stays the default.
+ */
+export async function listWallets(userId: string, options: { includeInactive?: boolean } = {}) {
   assertUser(userId);
   const wallets = await prisma.wallet.findMany({
-    where: { userId, isActive: true },
-    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+    where: { userId, ...(options.includeInactive ? {} : { isActive: true }) },
+    orderBy: [{ isActive: "desc" }, { isDefault: "desc" }, { createdAt: "asc" }],
   });
 
   return Promise.all(

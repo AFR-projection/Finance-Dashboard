@@ -29,6 +29,12 @@ export type AgentReply = {
   data?: unknown[];
   /** Set when a transaction is held back until the user taps a wallet button. */
   walletPrompt?: WalletPrompt;
+  /**
+   * Every draft awaiting an account, in the order the user dictated them.
+   * A message like "taxi 1.39, makan 6.50, rokok 1.50" creates three drafts;
+   * surfacing only the first one stranded the rest as invisible pending rows.
+   */
+  walletPrompts?: WalletPrompt[];
   /** Tokens burned across every round and every model in the fallback chain. */
   usage?: { promptTokens: number; outputTokens: number; model: string };
 };
@@ -39,8 +45,13 @@ export type AgentMessage = {
 };
 
 const MAX_AGENT_ROUNDS = 6;
-/** Ceiling on total tool calls per request so a looping model cannot run up cost. */
-const MAX_TOOL_CALLS = 14;
+/**
+ * Ceiling on total tool calls per request so a looping model cannot run up cost.
+ * Sized to fit a realistic dictation batch — someone listing a day's spending
+ * can easily reach a dozen entries, and silently dropping the tail would be
+ * worse than the extra tokens.
+ */
+const MAX_TOOL_CALLS = 30;
 const ALWAYS_MUTATING_TOOLS = new Set<AgentToolName>([
   "createTransaction",
   "updateTransaction",
@@ -276,7 +287,7 @@ async function runOpenRouterInner(
   const data: unknown[] = [];
   const writeReceipts: Array<{ walletName?: string; receipt: string }> = [];
   let writeAttempted = false;
-  let walletPrompt: WalletPrompt | undefined;
+  const walletPrompts: WalletPrompt[] = [];
   let verifiedWrite = false;
 
   const intent = classifyDeterministicIntent(params.message);
@@ -412,7 +423,7 @@ async function runOpenRouterInner(
             data.push(result);
             const mutation = getVerifiedMutation(result);
             if (mutation) verifiedWrite = true;
-            if (isWalletPromptResult(result)) walletPrompt = result.__walletPrompt;
+            if (isWalletPromptResult(result)) walletPrompts.push(result.__walletPrompt);
             const clientMessage = getClientMessage(result);
             if (clientMessage) {
               clientMessages.push(clientMessage);
@@ -425,8 +436,25 @@ async function runOpenRouterInner(
           // This is a workflow state owned by the tool, not prose for the model
           // to reinterpret. Stop immediately and let the channel render the
           // exact account choices returned by the tool.
-          if (walletPrompt) {
-            return { text: walletPrompt.question, toolsUsed, data, walletPrompt };
+          //
+          // All pending drafts are returned, not just the first: a batch like
+          // "taxi 1.39, makan 6.50, rokok 1.50" produces one prompt each, and
+          // dropping the rest left them as invisible rows the user could never
+          // confirm. Receipts from writes that did land in the same round are
+          // kept so the user sees what was already saved.
+          if (walletPrompts.length > 0) {
+            const saved = writeReceipts.map((write) => write.receipt);
+            const heading =
+              walletPrompts.length > 1
+                ? `${walletPrompts.length} transaksi menunggu pilihan rekening:`
+                : walletPrompts[0].question;
+            return {
+              text: [...saved, heading].filter(Boolean).join("\n\n"),
+              toolsUsed,
+              data,
+              walletPrompt: walletPrompts[0],
+              walletPrompts,
+            };
           }
           // A pure transaction-write round already has authoritative receipts
           // from the tool. Return them directly instead of paying for another
@@ -455,10 +483,10 @@ async function runOpenRouterInner(
           continue;
         }
 
-        return { text: finalText(guard(msg.content || "Selesai."), writeReceipts), toolsUsed, data, walletPrompt };
+        return { text: finalText(guard(msg.content || "Selesai."), writeReceipts), toolsUsed, data, walletPrompt: walletPrompts[0], walletPrompts };
       }
 
-      return { text: incompleteAgentReply(writeAttempted && !walletPrompt), toolsUsed, data, walletPrompt };
+      return { text: incompleteAgentReply(writeAttempted && walletPrompts.length === 0), toolsUsed, data, walletPrompt: walletPrompts[0], walletPrompts };
     } catch (error) {
       lastError = error instanceof Error ? error.message : "Unknown";
       // Tool sudah menulis ke database — mencoba model lain akan menjalankannya ulang.
@@ -469,10 +497,11 @@ async function runOpenRouterInner(
           error: lastError,
         });
         return {
-          text: incompleteAgentReply(writeAttempted && !walletPrompt),
+          text: incompleteAgentReply(writeAttempted && walletPrompts.length === 0),
           toolsUsed,
           data,
-          walletPrompt,
+          walletPrompt: walletPrompts[0],
+          walletPrompts,
         };
       }
     }

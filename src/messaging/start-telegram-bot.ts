@@ -66,10 +66,15 @@ export async function startEmbeddedTelegramBot() {
         body: JSON.stringify({ channel: "TELEGRAM", externalId, message }),
       });
       const json = (await res.json()) as {
-        data?: { text?: string; walletPrompt?: WalletPrompt };
+        data?: { text?: string; walletPrompt?: WalletPrompt; walletPrompts?: WalletPrompt[] };
         error?: string;
       };
-      if (json.data?.text) return { text: json.data.text, walletPrompt: json.data.walletPrompt };
+      if (json.data?.text)
+        return {
+          text: json.data.text,
+          walletPrompt: json.data.walletPrompt,
+          walletPrompts: json.data.walletPrompts,
+        };
       return { text: json.error || "Maaf, terjadi kesalahan." };
     } catch {
       return { text: "Maaf, terjadi kesalahan koneksi. Coba lagi nanti." };
@@ -99,15 +104,21 @@ export async function startEmbeddedTelegramBot() {
     }
   }
 
-  async function replyAgent(ctx: Context, reply: { text: string; walletPrompt?: WalletPrompt }) {
+  async function replyAgent(
+    ctx: Context,
+    reply: { text: string; walletPrompt?: WalletPrompt; walletPrompts?: WalletPrompt[] },
+  ) {
     const chunks = splitForChannel(formatForChannel(reply.text), 3500);
-    for (let i = 0; i < chunks.length; i++) {
-      const isLast = i === chunks.length - 1;
-      await ctx.reply(chunks[i], {
+    for (const chunk of chunks) {
+      await ctx.reply(chunk, { parse_mode: "HTML" });
+    }
+
+    // One keyboard per pending draft, so a batch of expenses can all be routed.
+    const prompts = reply.walletPrompts ?? (reply.walletPrompt ? [reply.walletPrompt] : []);
+    for (const prompt of prompts) {
+      await ctx.reply(formatForChannel(prompt.question), {
         parse_mode: "HTML",
-        ...(isLast && reply.walletPrompt
-          ? { reply_markup: walletKeyboard(reply.walletPrompt) }
-          : {}),
+        reply_markup: walletKeyboard(prompt),
       });
     }
   }

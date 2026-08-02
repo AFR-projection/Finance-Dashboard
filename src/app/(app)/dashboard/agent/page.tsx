@@ -65,14 +65,24 @@ export default function AgentPage() {
         body: JSON.stringify({ message: userText, channel: "WEB" }),
       });
       const json = await response.json();
+      // Each pending draft becomes its own message so every one of them gets a
+      // full set of account buttons. Batching them into a single bubble would
+      // leave all but the first draft unconfirmable.
+      const prompts: WalletPrompt[] =
+        json.data?.walletPrompts ?? (json.data?.walletPrompt ? [json.data.walletPrompt] : []);
       setMessages((current) => [
         ...current,
         {
           role: "assistant",
           text: json.data?.text ?? json.error?.message ?? "Permintaan belum berhasil diproses.",
-          walletPrompt: json.data?.walletPrompt,
           toolsUsed: json.data?.toolsUsed,
+          walletPrompt: prompts[0],
         },
+        ...prompts.slice(1).map((prompt) => ({
+          role: "assistant" as const,
+          text: prompt.question,
+          walletPrompt: prompt,
+        })),
       ]);
     } catch {
       setMessages((current) => [
