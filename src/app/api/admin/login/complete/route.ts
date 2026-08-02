@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { consumeAccessChallenge, getAccessChallenge } from "@/lib/access-challenge";
+import { recordAdminAction } from "@/lib/admin-audit";
 import { adminCookieOptions, issueAdminSession } from "@/lib/admin-session";
 import { prisma } from "@/lib/db";
 import { getClientIp, lookupGeo } from "@/lib/geo";
@@ -51,7 +52,7 @@ export async function POST(request: Request) {
 
     const user = await prisma.user.findUnique({
       where: { id: consumed.userId },
-      select: { id: true, role: true, status: true },
+      select: { id: true, role: true, status: true, username: true, name: true },
     });
     if (!user || user.role !== "ADMIN" || user.status === "SUSPENDED") {
       return NextResponse.json(
@@ -79,6 +80,15 @@ export async function POST(request: Request) {
       ip,
       fingerprintId: body.fingerprintId,
       country: geo.country,
+    });
+
+    await recordAdminAction({
+      actor: { userId: user.id, name: user.name, username: user.username },
+      action: "admin.login",
+      summary: `Sesi admin dibuka dari ${geo.city || geo.country || "lokasi tidak dikenal"}`,
+      targetType: "session",
+      tone: "warning",
+      ip,
     });
 
     return NextResponse.json({ ok: true, data: { redirectTo: "/" } });

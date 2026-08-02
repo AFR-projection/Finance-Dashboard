@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { emitAdminEvent } from "@/lib/admin-realtime";
+import { formatIdr } from "@/lib/admin-metrics";
 import { getMidtransKeys, grantPremium, verifySignature } from "@/lib/midtrans";
 import { sendTelegramMessage } from "@/lib/app-config";
 
@@ -73,7 +75,7 @@ export async function POST(request: Request) {
       const sub = await grantPremium(payment.userId);
       const user = await prisma.user.findUnique({
         where: { id: payment.userId },
-        select: { telegramChatId: true },
+        select: { telegramChatId: true, username: true, name: true },
       });
       if (user?.telegramChatId) {
         await sendTelegramMessage(
@@ -82,6 +84,13 @@ export async function POST(request: Request) {
             `${sub.currentPeriodEnd.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}.`,
         );
       }
+
+      const who = user?.username ? `@${user.username}` : user?.name || "pengguna";
+      emitAdminEvent({
+        kind: "payment.paid",
+        summary: `${who} membayar ${formatIdr(Number(body.gross_amount))}`,
+        tone: "positive",
+      });
     }
 
     return NextResponse.json({ ok: true });

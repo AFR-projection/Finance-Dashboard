@@ -3,7 +3,21 @@ import { decryptSecret } from "@/lib/crypto";
 import { getAppConfigRaw } from "@/lib/app-config";
 import { prisma } from "@/lib/db";
 
+/**
+ * Cadangan kalau baris config tidak terbaca. Sama dengan default kolom
+ * `premiumDurationDays` di `prisma/schema.prisma`.
+ */
 export const PREMIUM_DAYS = 30;
+
+/** Masa aktif Premium menurut panel master admin. */
+export async function premiumDurationDays() {
+  try {
+    const cfg = await getAppConfigRaw();
+    return cfg.premiumDurationDays > 0 ? cfg.premiumDurationDays : PREMIUM_DAYS;
+  } catch {
+    return PREMIUM_DAYS;
+  }
+}
 
 export type MidtransKeys = {
   serverKey: string;
@@ -50,12 +64,14 @@ export function verifySignature(input: {
 }
 
 /**
- * Extends a subscription by 30 days.
+ * Extends a subscription by the admin-configured period.
  *
  * Paying early must not burn the remaining days, so the new period starts from
  * the later of "now" and the current end date.
  */
-export async function grantPremium(userId: string, days = PREMIUM_DAYS) {
+export async function grantPremium(userId: string, days?: number) {
+  // Bukan default parameter: nilainya ada di database, jadi harus di-await.
+  const period = days ?? (await premiumDurationDays());
   const existing = await prisma.subscription.findUnique({
     where: { userId },
     select: { currentPeriodEnd: true },
@@ -66,7 +82,7 @@ export async function grantPremium(userId: string, days = PREMIUM_DAYS) {
     existing && existing.currentPeriodEnd.getTime() > now.getTime()
       ? existing.currentPeriodEnd
       : now;
-  const currentPeriodEnd = new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
+  const currentPeriodEnd = new Date(base.getTime() + period * 24 * 60 * 60 * 1000);
 
   return prisma.subscription.upsert({
     where: { userId },

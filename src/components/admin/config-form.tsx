@@ -3,13 +3,39 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Loader2 } from "lucide-react";
+import { inkButtonPrimary, inkInput } from "@/components/admin/ui";
+import { cn } from "@/lib/utils";
 
 export type ConfigField =
   | { name: string; label: string; type: "text" | "number" | "secret"; value?: string | number; hint?: string; placeholder?: string }
   | { name: string; label: string; type: "toggle"; value: boolean; hint?: string };
 
+/**
+ * Membaca angka yang diketik dengan gaya Indonesia.
+ *
+ * Semua field angka di sini bilangan bulat (kuota, rupiah, jumlah hari), jadi
+ * pemisah ribuan dibuang alih-alih dibaca sebagai desimal: "10.000" berarti
+ * sepuluh ribu, bukan sepuluh. `Number()` mentah dulu membaca "12.500" sebagai
+ * 12,5 lalu ditolak server karena bukan bilangan bulat.
+ */
+function parseInteger(raw: string) {
+  const negative = raw.trimStart().startsWith("-");
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) return null;
+  return negative ? -Number(digits) : Number(digits);
+}
+
 /** Generic save form for the admin config sections. */
-export function ConfigForm({ fields, title }: { fields: ConfigField[]; title: string }) {
+export function ConfigForm({
+  fields,
+  title,
+  bare = false,
+}: {
+  fields: ConfigField[];
+  title: string;
+  /** Set when the caller already supplies a Panel + PanelHeader around it. */
+  bare?: boolean;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [busy, setBusy] = useState(false);
@@ -32,7 +58,13 @@ export function ConfigForm({ fields, title }: { fields: ConfigField[]; title: st
       const value = String(raw ?? "").trim();
       // Blank secret means "leave the stored one alone".
       if (!value) continue;
-      payload[field.name] = field.type === "number" ? Number(value) : value;
+      if (field.type === "number") {
+        const parsed = parseInteger(value);
+        if (parsed === null) continue;
+        payload[field.name] = parsed;
+        continue;
+      }
+      payload[field.name] = value;
     }
 
     try {
@@ -59,21 +91,35 @@ export function ConfigForm({ fields, title }: { fields: ConfigField[]; title: st
   }
 
   return (
-    <form onSubmit={submit} className="rounded-3xl border border-ink-border bg-ink-soft/50 p-6">
-      <h2 className="text-sm font-bold uppercase tracking-[0.14em] text-ink-muted">{title}</h2>
+    <form
+      onSubmit={submit}
+      className={cn(
+        !bare && "rounded-3xl border border-ink-border bg-ink-soft/50 p-6 backdrop-blur-xl",
+      )}
+    >
+      {!bare && (
+        <h2 className="text-sm font-bold uppercase tracking-[0.14em] text-ink-muted">{title}</h2>
+      )}
 
-      <div className="mt-5 space-y-4">
+      <div className={cn("space-y-4", !bare && "mt-5")}>
         {fields.map((field) => (
           <div key={field.name}>
             {field.type === "toggle" ? (
-              <label className="flex cursor-pointer items-center gap-3">
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-ink-border bg-ink/40 p-3.5 transition-colors hover:border-ink-muted/30">
                 <input
                   type="checkbox"
                   name={field.name}
                   defaultChecked={field.value}
-                  className="size-4 rounded border-ink-border bg-ink accent-brand-glow"
+                  className="mt-0.5 size-4 cursor-pointer rounded border-ink-border bg-ink accent-brand-glow"
                 />
-                <span className="text-sm text-ink-foreground">{field.label}</span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-ink-foreground">
+                    {field.label}
+                  </span>
+                  {field.hint && (
+                    <span className="mt-0.5 block text-xs text-ink-muted">{field.hint}</span>
+                  )}
+                </span>
               </label>
             ) : (
               <>
@@ -86,25 +132,26 @@ export function ConfigForm({ fields, title }: { fields: ConfigField[]; title: st
                 <input
                   id={field.name}
                   name={field.name}
-                  type={field.type === "secret" ? "password" : field.type}
+                  // Field angka sengaja bertipe text: `type="number"` mengosongkan
+                  // sendiri isian yang dianggapnya tidak valid, jadi "10,000"
+                  // hilang diam-diam sebelum sempat dibaca. Parsing dikerjakan
+                  // `parseInteger` supaya perilakunya sama di semua browser.
+                  type={field.type === "secret" ? "password" : "text"}
+                  inputMode={field.type === "number" ? "numeric" : undefined}
                   defaultValue={field.type === "secret" ? "" : (field.value ?? "")}
                   placeholder={field.placeholder}
                   autoComplete="off"
-                  className="mt-2 h-11 w-full rounded-xl border border-ink-border bg-ink/60 px-3.5 text-sm text-ink-foreground outline-none placeholder:text-ink-muted focus-visible:ring-3 focus-visible:ring-brand-glow/40"
+                  className={cn(inkInput, "mt-2")}
                 />
+                {field.hint && <p className="mt-1.5 text-xs text-ink-muted">{field.hint}</p>}
               </>
             )}
-            {field.hint && <p className="mt-1.5 text-xs text-ink-muted">{field.hint}</p>}
           </div>
         ))}
       </div>
 
       <div className="mt-6 flex items-center gap-3">
-        <button
-          type="submit"
-          disabled={busy || pending}
-          className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-2xl bg-white px-5 text-sm font-semibold text-ink outline-none transition-colors hover:bg-white/90 focus-visible:ring-3 focus-visible:ring-white/40 disabled:opacity-60"
-        >
+        <button type="submit" disabled={busy || pending} className={inkButtonPrimary}>
           {busy || pending ? <Loader2 className="size-4 animate-spin" /> : null}
           Simpan
         </button>

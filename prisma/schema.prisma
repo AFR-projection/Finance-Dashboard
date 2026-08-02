@@ -95,6 +95,9 @@ model AiUsageLog {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  /// The admin console asks "what happened platform-wide in the last N minutes",
+  /// which the userId-leading composite above cannot serve.
+  @@index([createdAt])
   @@map("ai_usage_log")
 }
 
@@ -113,6 +116,7 @@ model Payment {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([createdAt])
   @@map("payments")
 }
 
@@ -157,6 +161,7 @@ model User {
   wallets       Wallet[]
   pushSubscriptions PushSubscription[]
 
+  @@index([createdAt])
   @@map("users")
 }
 
@@ -299,6 +304,7 @@ model Transaction {
   @@index([userId, type])
   @@index([userId, categoryId])
   @@index([userId, walletId])
+  @@index([createdAt])
   @@map("transactions")
 }
 
@@ -486,6 +492,7 @@ model AccessChallenge {
 
   @@index([codeHash])
   @@index([expiresAt])
+  @@index([createdAt])
   @@map("access_challenges")
 }
 
@@ -509,6 +516,8 @@ model AccessSession {
 
   @@index([userId])
   @@index([expiresAt])
+  /// The security console lists live sessions newest-activity-first.
+  @@index([lastSeenAt])
   @@map("access_sessions")
 }
 
@@ -555,6 +564,9 @@ model AppConfig {
   freeTokenQuota       Int      @default(60000) @map("free_token_quota")
   premiumTokenQuota    Int      @default(1500000) @map("premium_token_quota")
   premiumPriceIdr      Int      @default(20000) @map("premium_price_idr")
+  /// Masa aktif satu kali bayar Premium. Dipakai `grantPremium()`, nama item
+  /// Midtrans, dan salinan di landing page — jadi satu angka ini yang berlaku.
+  premiumDurationDays  Int      @default(30) @map("premium_duration_days")
   heartbeatForFree     Boolean  @default(false) @map("heartbeat_for_free")
   midtransServerKey    String?  @map("midtrans_server_key") @db.Text
   midtransClientKey    String?  @map("midtrans_client_key") @db.Text
@@ -563,4 +575,28 @@ model AppConfig {
   updatedAt            DateTime @updatedAt @map("updated_at")
 
   @@map("app_config")
+}
+
+/// Every state-changing action taken from the master admin panel.
+///
+/// Deliberately not a relation to User: the row must survive the account it
+/// points at being deleted, otherwise a cascade would erase the evidence of the
+/// deletion itself.
+model AdminAuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String   @map("actor_user_id")
+  actorName   String?  @map("actor_name")
+  /// Machine-readable verb, e.g. "user.suspend", "config.update".
+  action      String
+  targetType  String?  @map("target_type")
+  targetId    String?  @map("target_id")
+  /// Human sentence rendered straight into the console feed.
+  summary     String
+  meta        Json?
+  ip          String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("admin_audit_log")
 }

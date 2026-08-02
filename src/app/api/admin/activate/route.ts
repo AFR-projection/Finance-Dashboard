@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/admin-session";
+import { clientIp, recordAdminAction } from "@/lib/admin-audit";
 import { sendTelegramMessage } from "@/lib/app-config";
 import { prisma } from "@/lib/db";
-import { grantPremium, PREMIUM_DAYS } from "@/lib/midtrans";
+import { grantPremium, premiumDurationDays } from "@/lib/midtrans";
 
 const schema = z.object({
   userId: z.string().min(1),
@@ -23,11 +24,12 @@ export async function POST(request: Request) {
 
   try {
     const body = schema.parse(await request.json());
-    const days = body.days ?? PREMIUM_DAYS;
+    // Tanpa `days` eksplisit, ikuti masa aktif yang disetel di panel Paket.
+    const days = body.days ?? (await premiumDurationDays());
 
     const user = await prisma.user.findUnique({
       where: { id: body.userId },
-      select: { id: true, username: true, telegramChatId: true },
+      select: { id: true, username: true, name: true, telegramChatId: true },
     });
     if (!user) {
       return NextResponse.json({ ok: false, error: "Pengguna tidak ditemukan." }, { status: 404 });
@@ -56,6 +58,18 @@ export async function POST(request: Request) {
         })}.`,
       );
     }
+
+    const who = user.username ? `@${user.username}` : user.name || "pengguna";
+    await recordAdminAction({
+      actor: admin,
+      action: "user.premium",
+      summary: `Mengaktifkan Premium ${days} hari untuk ${who}`,
+      targetType: "user",
+      targetId: user.id,
+      meta: { days, until: sub.currentPeriodEnd.toISOString() },
+      tone: "positive",
+      ip: clientIp(request),
+    });
 
     return NextResponse.json({ ok: true, data: { until: sub.currentPeriodEnd } });
   } catch (error) {

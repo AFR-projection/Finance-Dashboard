@@ -4,6 +4,11 @@ import { loadEnvConfig } from "@next/env";
 import next from "next";
 import { Server as SocketIOServer } from "socket.io";
 import { setSocketServer } from "./src/lib/socket-server";
+import { ADMIN_ROOM, startAdminPulse } from "./src/lib/admin-realtime";
+// Not `admin-session`: that module pulls in `next/headers`, which throws on
+// import outside a Next request runtime — and this file is plain Node.
+import { ADMIN_COOKIE, readCookieHeader, verifyAdminToken } from "./src/lib/admin-token";
+import { prisma } from "./src/lib/db";
 
 loadEnvConfig(process.cwd());
 
@@ -47,6 +52,36 @@ function buildCorsOrigin() {
   };
 }
 
+/**
+ * Full admin check for a socket handshake.
+ *
+ * The console room broadcasts platform-wide figures, so a valid signature is
+ * not enough — the same three gates the HTTP side applies in `getAdminSession`
+ * are repeated here, because a socket outlives the request that opened it and
+ * would otherwise keep streaming to a revoked or demoted admin.
+ */
+async function isAdminHandshake(cookieHeader: string | undefined) {
+  const token = readCookieHeader(cookieHeader, ADMIN_COOKIE);
+  if (!token) return false;
+
+  try {
+    const claims = await verifyAdminToken(token);
+    if (!claims) return false;
+
+    const row = await prisma.accessSession.findUnique({ where: { id: claims.sessionId } });
+    if (!row || row.scope !== "ADMIN" || row.userId !== claims.userId) return false;
+    if (row.revokedAt || row.expiresAt.getTime() <= Date.now()) return false;
+
+    const user = await prisma.user.findUnique({
+      where: { id: row.userId },
+      select: { role: true, status: true },
+    });
+    return user?.role === "ADMIN" && user.status !== "SUSPENDED";
+  } catch {
+    return false;
+  }
+}
+
 app.prepare().then(() => {
   const httpServer = createServer(async (req, res) => {
     try {
@@ -69,6 +104,7 @@ app.prepare().then(() => {
   });
 
   setSocketServer(io);
+  startAdminPulse(io, isAdminHandshake);
 
   io.on("connection", (socket) => {
     socket.on("login:join", (sessionId: string) => {
@@ -81,6 +117,16 @@ app.prepare().then(() => {
       if (typeof userId === "string" && userId.length >= 8 && userId.length <= 64) {
         socket.join(`user:${userId}`);
       }
+    });
+
+    // Verified per join rather than once at handshake, so a logout or a revoke
+    // during a long-lived connection cannot be papered over by a stale flag.
+    socket.on("admin:join", async (ack?: (ok: boolean) => void) => {
+      const ok = await isAdminHandshake(socket.handshake.headers.cookie);
+      if (ok) socket.join(ADMIN_ROOM);
+      else socket.leave(ADMIN_ROOM);
+      if (typeof ack === "function") ack(ok);
+      socket.emit("admin:ready", { ok });
     });
   });
 

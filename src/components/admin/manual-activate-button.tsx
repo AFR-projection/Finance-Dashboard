@@ -4,8 +4,13 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Sparkles } from "lucide-react";
 
-/** Grants 30 days of Premium without a Midtrans payment. */
-export function ManualActivateButton({ userId }: { userId: string }) {
+/**
+ * Grants one Premium period without a Midtrans payment.
+ *
+ * `days` is only the label: the route reads the configured period itself, so a
+ * stale page cannot hand out the wrong duration.
+ */
+export function ManualActivateButton({ userId, days = 30 }: { userId: string; days?: number }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [busy, setBusy] = useState(false);
@@ -46,7 +51,7 @@ export function ManualActivateButton({ userId }: { userId: string }) {
         ) : (
           <Sparkles aria-hidden className="size-3.5" strokeWidth={2.2} />
         )}
-        +30 hari
+        +{days} hari
       </button>
       {error && (
         <span role="alert" className="text-[11px] text-rose-300">

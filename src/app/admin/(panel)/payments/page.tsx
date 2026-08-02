@@ -1,84 +1,181 @@
+import { CreditCard, TrendingUp } from "lucide-react";
+import Link from "next/link";
+import {
+  ChartLegend,
+  InkAreaChart,
+  INK_SERIES,
+  type Series,
+} from "@/components/admin/ink-chart";
+import { RevenueTiles } from "@/components/admin/revenue-tiles";
+import {
+  EmptyRow,
+  InkTable,
+  PageHeader,
+  Panel,
+  PanelHeader,
+  Td,
+  Th,
+  Tone,
+  Tr,
+  relativeTime,
+} from "@/components/admin/ui";
+import { formatIdr, readAdminPulse, readGrowthSeries } from "@/lib/admin-metrics";
 import { prisma } from "@/lib/db";
+import type { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
-const money = (value: number) =>
-  new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 })
-    .format(value);
+const PAID = ["settlement", "capture"];
 
-export default async function AdminPaymentsPage() {
-  const payments = await prisma.payment.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 100,
-    include: { user: { select: { username: true, name: true } } },
-  });
+const REVENUE_SERIES: Series[] = [
+  { key: "revenue", label: "Pendapatan", color: INK_SERIES.secondary },
+];
 
-  const paid = payments.filter((p) => p.status === "settlement" || p.status === "capture");
-  const revenue = paid.reduce((total, p) => total + p.grossAmount, 0);
+function toneForStatus(status: string) {
+  if (PAID.includes(status)) return "positive" as const;
+  if (status === "pending") return "warning" as const;
+  if (status === "deny" || status === "cancel" || status === "expire") return "danger" as const;
+  return "neutral" as const;
+}
+
+export default async function AdminPaymentsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string }>;
+}) {
+  const { status } = await searchParams;
+
+  const where: Prisma.PaymentWhereInput =
+    status === "paid"
+      ? { status: { in: PAID } }
+      : status === "pending"
+        ? { status: "pending" }
+        : status === "failed"
+          ? { status: { in: ["deny", "cancel", "expire"] } }
+          : {};
+
+  const [pulse, series, payments, lifetime] = await Promise.all([
+    readAdminPulse(),
+    readGrowthSeries(30),
+    prisma.payment.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      include: { user: { select: { username: true, name: true } } },
+    }),
+    prisma.payment.aggregate({
+      where: { status: { in: PAID } },
+      _sum: { grossAmount: true },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const chips = [
+    { value: undefined, label: "Semua" },
+    { value: "paid", label: "Lunas" },
+    { value: "pending", label: "Menunggu" },
+    { value: "failed", label: "Gagal" },
+  ] as const;
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold tracking-[-0.03em] text-ink-foreground">Pembayaran</h1>
-      <p className="mt-2 text-sm text-ink-muted">
-        {paid.length} pembayaran lunas · total {money(revenue)}. Aktivasi manual ada di halaman
-        Pengguna.
-      </p>
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Keuangan"
+        title="Pembayaran"
+        description="Aktivasi manual dicatat di tabel yang sama dengan order id berawalan manual_."
+      />
 
-      <div className="mt-6 overflow-x-auto rounded-3xl border border-ink-border bg-ink-soft/50">
-        <table className="w-full min-w-[40rem] text-sm">
-          <caption className="sr-only">Riwayat pembayaran</caption>
-          <thead>
-            <tr className="border-b border-ink-border text-left text-[11px] uppercase tracking-[0.14em] text-ink-muted">
-              <th scope="col" className="px-5 py-3.5 font-bold">Order</th>
-              <th scope="col" className="px-5 py-3.5 font-bold">Pengguna</th>
-              <th scope="col" className="px-5 py-3.5 font-bold">Jumlah</th>
-              <th scope="col" className="px-5 py-3.5 font-bold">Status</th>
-              <th scope="col" className="px-5 py-3.5 font-bold">Tanggal</th>
-            </tr>
-          </thead>
-          <tbody>
-            {payments.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-5 py-10 text-center text-ink-muted">
-                  Belum ada pembayaran.
-                </td>
-              </tr>
-            )}
-            {payments.map((payment) => {
-              const isPaid = payment.status === "settlement" || payment.status === "capture";
-              return (
-                <tr key={payment.id} className="border-b border-ink-border/60 last:border-0">
-                  <td className="px-5 py-3.5">
-                    <span className="tabular-money text-xs text-ink-muted">{payment.orderId}</span>
-                  </td>
-                  <td className="px-5 py-3.5 text-ink-foreground">
-                    {payment.user.username ? `@${payment.user.username}` : payment.user.name || "—"}
-                  </td>
-                  <td className="tabular-money px-5 py-3.5 text-ink-foreground">
-                    {payment.grossAmount === 0 ? "manual" : money(payment.grossAmount)}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
-                        isPaid ? "bg-brand-glow/15 text-brand-glow" : "bg-ink text-ink-muted"
-                      }`}
-                    >
-                      {payment.status}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 text-xs text-ink-muted">
-                    {payment.createdAt.toLocaleDateString("id-ID", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <RevenueTiles
+        initialPulse={pulse}
+        totalRevenue={lifetime._sum.grossAmount ?? 0}
+        totalPaid={lifetime._count._all}
+      />
+
+      <Panel>
+        <PanelHeader
+          title="Pendapatan 30 hari"
+          icon={TrendingUp}
+          actions={<ChartLegend series={REVENUE_SERIES} />}
+        />
+        <div className="p-4 pr-5">
+          <InkAreaChart
+            data={series}
+            series={REVENUE_SERIES}
+            height={230}
+            format="idr"
+          />
+        </div>
+      </Panel>
+
+      <Panel>
+        <PanelHeader
+          title="Riwayat transaksi"
+          hint={`${payments.length} entri terbaru`}
+          icon={CreditCard}
+          actions={
+            <div className="flex flex-wrap gap-1.5">
+              {chips.map((chip) => {
+                const active = (status ?? undefined) === chip.value;
+                return (
+                  <Link
+                    key={chip.label}
+                    href={chip.value ? `?status=${chip.value}` : "?"}
+                    className={`inline-flex h-8 items-center rounded-lg border px-2.5 text-[11px] font-semibold outline-none transition-colors focus-visible:ring-3 focus-visible:ring-brand-glow/40 ${
+                      active
+                        ? "border-brand-glow/40 bg-brand-glow/10 text-brand-glow"
+                        : "border-ink-border text-ink-muted hover:text-ink-foreground"
+                    }`}
+                  >
+                    {chip.label}
+                  </Link>
+                );
+              })}
+            </div>
+          }
+        />
+        <InkTable
+          caption="Riwayat pembayaran"
+          minWidth="46rem"
+          head={
+            <>
+              <Th>Order</Th>
+              <Th>Pengguna</Th>
+              <Th className="text-right">Jumlah</Th>
+              <Th>Status</Th>
+              <Th className="text-right">Waktu</Th>
+            </>
+          }
+        >
+          {payments.length === 0 && <EmptyRow colSpan={5}>Belum ada pembayaran.</EmptyRow>}
+          {payments.map((payment) => {
+            const manual = payment.orderId.startsWith("manual_");
+            return (
+              <Tr key={payment.id}>
+                <Td>
+                  <span className="tabular-money text-xs text-ink-muted">{payment.orderId}</span>
+                  {manual && (
+                    <Tone tone="info" className="ml-2">
+                      manual
+                    </Tone>
+                  )}
+                </Td>
+                <Td className="text-ink-foreground">
+                  {payment.user.username ? `@${payment.user.username}` : payment.user.name || "—"}
+                </Td>
+                <Td className="tabular-money text-right text-ink-foreground">
+                  {payment.grossAmount === 0 ? "—" : formatIdr(payment.grossAmount)}
+                </Td>
+                <Td>
+                  <Tone tone={toneForStatus(payment.status)}>{payment.status}</Tone>
+                </Td>
+                <Td className="text-right text-xs text-ink-muted">
+                  {relativeTime(payment.createdAt)}
+                </Td>
+              </Tr>
+            );
+          })}
+        </InkTable>
+      </Panel>
     </div>
   );
 }

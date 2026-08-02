@@ -47,8 +47,10 @@ export async function POST(request: Request) {
           transaction_details: { order_id: orderId, gross_amount: grossAmount },
           item_details: [
             {
-              id: "premium-30",
-              name: "Ledgerly Premium 30 hari",
+              // Harga dan masa aktif keduanya diatur dari panel master admin,
+              // jadi label yang dilihat pembeli harus ikut angka itu.
+              id: `premium-${cfg.premiumDurationDays}`,
+              name: `Ledgerly Premium ${cfg.premiumDurationDays} hari`,
               price: grossAmount,
               quantity: 1,
             },

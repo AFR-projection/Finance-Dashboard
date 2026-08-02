@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ChallengePurpose } from "@prisma/client";
 import { attachUserAndApprove, getAccessChallenge } from "@/lib/access-challenge";
+import { emitAdminEvent } from "@/lib/admin-realtime";
 import { sendTelegramMessage } from "@/lib/app-config";
 import { prisma } from "@/lib/db";
 import { FinanceEngine } from "@/finance-engine";
@@ -146,6 +147,12 @@ export async function POST(request: Request) {
         `"beli kopi 25 ribu"\n\n` +
         `Ketik /help untuk contoh lainnya.`,
     );
+
+    emitAdminEvent({
+      kind: "user.signup",
+      summary: `@${username} mendaftar lewat Telegram`,
+      tone: "positive",
+    });
 
     return NextResponse.json({ ok: true, data: { username } });
   } catch (error) {

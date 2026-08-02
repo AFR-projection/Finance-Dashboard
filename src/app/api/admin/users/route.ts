@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAdminSession } from "@/lib/admin-session";
+import { clientIp, recordAdminAction } from "@/lib/admin-audit";
 import { prisma } from "@/lib/db";
 import { revokeAllAccessSessions } from "@/lib/access-session";
 
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
 
     const target = await prisma.user.findUnique({
       where: { id: body.userId },
-      select: { id: true, role: true },
+      select: { id: true, role: true, username: true, name: true },
     });
     if (!target) {
       return NextResponse.json({ ok: false, error: "Pengguna tidak ditemukan." }, { status: 404 });
@@ -52,6 +53,17 @@ export async function POST(request: Request) {
       data: { status: suspending ? "SUSPENDED" : "ACTIVE" },
     });
     if (suspending) await revokeAllAccessSessions(body.userId);
+
+    const who = target.username ? `@${target.username}` : target.name || "pengguna";
+    await recordAdminAction({
+      actor: admin,
+      action: suspending ? "user.suspend" : "user.activate",
+      summary: suspending ? `Menangguhkan ${who}` : `Mengaktifkan kembali ${who}`,
+      targetType: "user",
+      targetId: target.id,
+      tone: suspending ? "danger" : "positive",
+      ip: clientIp(request),
+    });
 
     return NextResponse.json({ ok: true, data: { status: suspending ? "SUSPENDED" : "ACTIVE" } });
   } catch (error) {

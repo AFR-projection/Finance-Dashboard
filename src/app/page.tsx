@@ -19,6 +19,12 @@ import { InsightShowcase } from "@/components/marketing/insight-showcase";
 import { ProductMockup } from "@/components/marketing/product-mockup";
 import { Reveal } from "@/components/marketing/reveal";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
+import {
+  formatPriceIdr,
+  formatTokens,
+  readPublicPlan,
+  type PublicPlan,
+} from "@/lib/public-plan";
 
 export const metadata: Metadata = {
   // `absolute` opts out of the layout's `%s · Ledgerly` template — the brand
@@ -38,9 +44,18 @@ export const metadata: Metadata = {
   },
 };
 
+/**
+ * Plan figures come from the master admin panel, so the landing page is
+ * revalidated rather than frozen at build time. `/api/admin/config` also calls
+ * `revalidatePath("/")`, which makes a price change visible on the next hit
+ * instead of up to five minutes later.
+ */
+export const revalidate = 300;
+
 /* Single source of truth for the FAQ: rendered UI and FAQPage JSON-LD must
  * never diverge, or the structured data becomes fiction. */
-const faqs: FaqItem[] = [
+function buildFaqs(plan: PublicPlan): FaqItem[] {
+  return [
   {
     q: "Perlu email atau password untuk daftar?",
     a: "Tidak. Pendaftaran cukup pilih username lalu tekan Start di bot Telegram — akun langsung aktif. Saat login, bot mengirim konfirmasi ke Telegram kamu sendiri, jadi tidak ada password yang bisa bocor.",
@@ -51,7 +66,7 @@ const faqs: FaqItem[] = [
   },
   {
     q: "Apa bedanya paket Gratis dan Premium?",
-    a: "Pencatatan, dompet, budget, target tabungan, dan dashboard terbuka penuh di paket Gratis, dengan jatah AI untuk pemakaian ringan. Premium (Rp 20.000 per 30 hari) memberi kuota AI jauh lebih besar plus laporan dan insight berkala yang dikirim otomatis ke Telegram.",
+    a: `Pencatatan, dompet, budget, target tabungan, dan dashboard terbuka penuh di paket Gratis, dengan jatah AI ${formatTokens(plan.freeTokenQuota)} token per bulan. Premium (${formatPriceIdr(plan.premiumPriceIdr)} per ${plan.premiumDurationDays} hari) menaikkan kuota AI ke ${formatTokens(plan.premiumTokenQuota)} token plus laporan dan insight berkala yang dikirim otomatis ke Telegram.`,
   },
   {
     q: "Apakah data keuangan saya aman?",
@@ -59,13 +74,14 @@ const faqs: FaqItem[] = [
   },
   {
     q: "Apakah harus bayar pakai kartu kredit?",
-    a: "Tidak. Mulai sepenuhnya gratis tanpa data pembayaran. Kalau upgrade ke Premium, pembayaran lewat QRIS, transfer bank, atau e-wallet — sekali bayar berlaku 30 hari, tanpa perpanjangan otomatis.",
+    a: `Tidak. Mulai sepenuhnya gratis tanpa data pembayaran. Kalau upgrade ke Premium, pembayaran lewat QRIS, transfer bank, atau e-wallet — sekali bayar berlaku ${plan.premiumDurationDays} hari, tanpa perpanjangan otomatis.`,
   },
   {
     q: "Kalau berhenti langganan, data saya hilang?",
     a: "Tidak hilang. Saat masa Premium habis, akun otomatis turun ke paket Gratis. Semua transaksi, dompet, dan laporan lama tetap bisa dibuka.",
   },
-];
+  ];
+}
 
 const bentoSmall = [
   {
@@ -112,7 +128,7 @@ const navLinks = [
   { href: "#faq", label: "FAQ" },
 ];
 
-function jsonLd() {
+function jsonLd(plan: PublicPlan, faqs: FaqItem[]) {
   const organization = {
     "@type": "Organization",
     "@id": `${SITE_URL}/#organization`,
@@ -133,7 +149,12 @@ function jsonLd() {
     publisher: { "@id": `${SITE_URL}/#organization` },
     offers: [
       { "@type": "Offer", name: "Gratis", price: "0", priceCurrency: "IDR" },
-      { "@type": "Offer", name: "Premium 30 hari", price: "20000", priceCurrency: "IDR" },
+      {
+        "@type": "Offer",
+        name: `Premium ${plan.premiumDurationDays} hari`,
+        price: String(plan.premiumPriceIdr),
+        priceCurrency: "IDR",
+      },
     ],
   };
   const faqPage = {
@@ -148,12 +169,15 @@ function jsonLd() {
   return { "@context": "https://schema.org", "@graph": [organization, webApplication, faqPage] };
 }
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const plan = await readPublicPlan();
+  const faqs = buildFaqs(plan);
+
   return (
     <div className="relative min-h-svh overflow-x-hidden">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd()) }}
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd(plan, faqs)) }}
       />
       <a href="#konten-utama" className="mk-skip-link">
         Langsung ke konten
@@ -477,7 +501,12 @@ export default function LandingPage() {
                       "Transaksi & dompet tanpa batas",
                       "Dashboard, budget, target tabungan",
                       "Catat lewat chat Telegram",
-                      "Jatah AI untuk pemakaian ringan",
+                      `Jatah AI ${formatTokens(plan.freeTokenQuota)} token / bulan`,
+                      // Whether the free plan gets the scheduled reports is an
+                      // admin switch, so the bullet has to follow it.
+                      ...(plan.heartbeatForFree
+                        ? ["Laporan berkala otomatis ke Telegram"]
+                        : []),
                     ].map((item) => (
                       <li key={item} className="flex gap-2.5 text-foreground">
                         <Check aria-hidden className="mt-0.5 size-4 shrink-0 text-primary" strokeWidth={2.6} />
@@ -504,9 +533,9 @@ export default function LandingPage() {
                   </div>
                   <p className="relative mt-4 flex items-baseline gap-1.5">
                     <span className="tabular-money text-[2.6rem] leading-none font-bold text-ink-foreground">
-                      Rp 20.000
+                      {formatPriceIdr(plan.premiumPriceIdr)}
                     </span>
-                    <span className="text-sm text-ink-muted">/30 hari</span>
+                    <span className="text-sm text-ink-muted">/{plan.premiumDurationDays} hari</span>
                   </p>
                   <p className="relative mt-3 text-sm leading-relaxed text-ink-muted">
                     Buat yang tiap hari mengandalkan AI-nya. Tanpa perpanjangan otomatis.
@@ -514,7 +543,7 @@ export default function LandingPage() {
                   <ul className="relative mt-7 space-y-3.5 text-sm">
                     {[
                       "Semua fitur paket Gratis",
-                      "Kuota AI jauh lebih besar",
+                      `Kuota AI ${formatTokens(plan.premiumTokenQuota)} token / ${plan.premiumDurationDays} hari`,
                       "Laporan berkala otomatis ke Telegram",
                       "Insight proaktif saat ada anomali",
                     ].map((item) => (
