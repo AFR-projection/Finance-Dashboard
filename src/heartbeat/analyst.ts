@@ -21,6 +21,31 @@ export type HeartbeatAnalysis = {
   actions: string[];
 };
 
+/**
+ * Kegagalan dibedakan, bukan disamakan jadi null.
+ *
+ * "Key belum diisi" adalah salah konfigurasi yang bisa diperbaiki admin dalam
+ * satu menit; "semua model gagal" adalah gangguan penyedia. Keduanya dulu
+ * terlihat identik dari luar, jadi panel admin tidak bisa memberi tahu yang
+ * mana yang sedang terjadi.
+ */
+export type HeartbeatAnalysisResult =
+  | { ok: true; analysis: HeartbeatAnalysis }
+  | { ok: false; reason: "no-api-key" | "all-models-failed" };
+
+/**
+ * Bagian config yang datang dari node "Analis LLM" di Agent Studio.
+ *
+ * Defaultnya wajib sama dengan angka yang dulu di-hardcode di file ini, supaya
+ * instalasi yang belum pernah mem-publish graph berperilaku persis seperti dulu.
+ */
+export type HeartbeatAnalystSettings = { modelOverride: string; temperature: number };
+
+export const DEFAULT_ANALYST_SETTINGS: HeartbeatAnalystSettings = {
+  modelOverride: "",
+  temperature: 0.4,
+};
+
 const DAILY_BRIEF = `Tugasmu: brief pagi. Angkat maksimal 2 hal paling penting hari ini, lalu satu aksi konkret yang bisa dikerjakan hari ini.`;
 
 const WEEKLY_BRIEF = `Tugasmu: rekap Senin. Ringkas pekan lalu (pemasukan, pengeluaran, apa yang berubah), lalu rencana pekan ini, lalu status goal. Tetap padat.`;
@@ -95,25 +120,28 @@ function parseAnalysis(raw: string): HeartbeatAnalysis | null {
 }
 
 /**
- * Returns null when the provider or the response is unusable. The caller skips
- * the cycle instead of pushing a bland template — a heartbeat the user learns to
- * ignore is worse than no heartbeat.
+ * Reports why the cycle cannot produce anything rather than pushing a bland
+ * template — a heartbeat the user learns to ignore is worse than no heartbeat.
  */
 export async function analyzeHeartbeat(params: {
   snapshot: HeartbeatSnapshot;
   config: AiRuntimeConfig;
   /** Set to attribute token spend; heartbeat never consumes the user's quota. */
   userId?: string;
-}): Promise<HeartbeatAnalysis | null> {
+  /** Dari node "Analis LLM". Dihilangkan = pakai perilaku bawaan. */
+  analyst?: HeartbeatAnalystSettings;
+}): Promise<HeartbeatAnalysisResult> {
   const { snapshot, config } = params;
+  const analyst = params.analyst ?? DEFAULT_ANALYST_SETTINGS;
   if (!config.apiKey) {
     log.warn(
       "Heartbeat dilewati: API key AI tidak tersedia. Cek panel admin /ai — kalau key sudah diisi, kemungkinan ENCRYPTION_KEY berubah sehingga key lama tidak bisa dibaca.",
     );
-    return null;
+    return { ok: false, reason: "no-api-key" };
   }
 
-  const models = [config.model, ...(config.fallbackModels ?? []).filter((m) => m !== config.model)];
+  const primary = analyst.modelOverride || config.model;
+  const models = [primary, ...(config.fallbackModels ?? []).filter((m) => m !== primary)];
 
   for (const model of models) {
     try {
@@ -134,7 +162,7 @@ export async function analyzeHeartbeat(params: {
               content: `Data keuangan user (satu-satunya sumber angka):\n${JSON.stringify(snapshot, null, 1)}`,
             },
           ],
-          temperature: 0.4,
+          temperature: analyst.temperature,
           response_format: { type: "json_object" },
         }),
       });
@@ -160,7 +188,7 @@ export async function analyzeHeartbeat(params: {
 
       const content = json.choices?.[0]?.message?.content ?? "";
       const analysis = parseAnalysis(content);
-      if (analysis) return analysis;
+      if (analysis) return { ok: true, analysis };
 
       throw new Error("Respons bukan JSON analisis yang valid");
     } catch (err) {
@@ -169,5 +197,5 @@ export async function analyzeHeartbeat(params: {
   }
 
   log.error("Heartbeat dilewati: semua model gagal");
-  return null;
+  return { ok: false, reason: "all-models-failed" };
 }

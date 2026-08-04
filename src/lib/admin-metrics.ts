@@ -22,7 +22,9 @@ export type AdminEventKind =
   | "admin.login"
   | "session.revoke"
   | "access.approved"
-  | "access.rejected";
+  | "access.rejected"
+  | "agent.publish"
+  | "agent.rollback";
 
 export type AdminEvent = {
   id: string;

@@ -15,6 +15,86 @@ import {
   enforceWriteClaim,
   requiredToolForIntent,
 } from "./intent-policy";
+import type { ChatPlan } from "./graph/compile";
+import { loadChatPlan } from "./graph/store";
+import type { AgentNodeKind } from "./graph/types";
+import { emitAgentEvent, newRunId } from "@/lib/agent-telemetry";
+
+/**
+ * Pelapor jalannya satu run ke kanvas Agent Studio.
+ *
+ * Sengaja tidak async dan tidak pernah melempar: telemetri tidak boleh punya
+ * suara dalam nasib sebuah pesan yang mencatat uang. Node yang tidak ada di
+ * graph (mis. sudah dihapus admin) dilewati diam-diam — kanvas tidak punya
+ * kotak untuk menyalakannya.
+ */
+type RunTracer = {
+  node: (
+    kind: AgentNodeKind,
+    status: "running" | "ok" | "skipped" | "error",
+    detail?: string,
+    ms?: number,
+  ) => void;
+  end: (status: "ok" | "error", toolsUsed: string[]) => void;
+};
+
+function createChatTracer(plan: ChatPlan, channel: string): RunTracer {
+  const runId = newRunId();
+  const startedAt = Date.now();
+  emitAgentEvent({
+    type: "run:start",
+    runId,
+    track: "chat",
+    channel,
+    at: new Date().toISOString(),
+  });
+
+  return {
+    node(kind, status, detail, ms) {
+      const nodeId = plan.nodeIds[kind];
+      if (!nodeId) return;
+      emitAgentEvent({
+        type: "node",
+        runId,
+        nodeId,
+        kind,
+        status,
+        ms,
+        detail,
+        at: new Date().toISOString(),
+      });
+    },
+    end(status, toolsUsed) {
+      emitAgentEvent({
+        type: "run:end",
+        runId,
+        status,
+        ms: Date.now() - startedAt,
+        toolsUsed,
+        at: new Date().toISOString(),
+      });
+    },
+  };
+}
+
+/**
+ * Dipakai saat node "Konteks Keuangan" dimatikan atau dihapus dari kanvas.
+ *
+ * Model tetap dapat timezone dan mata uang — tanpa itu setiap angka yang ia
+ * tulis jadi ambigu — tapi tidak satu pun blok data keuangan ikut.
+ */
+const CONTEXT_ALL_OFF: NonNullable<ChatPlan["context"]> = {
+  wallets: false,
+  budget: false,
+  prediction: false,
+  goals: false,
+  insights: false,
+  memories: false,
+  recentTransactions: false,
+  memoryLimit: 0,
+  transactionLimit: 0,
+  insightLimit: 0,
+};
 
 export type AiRuntimeConfig = {
   provider: "OPENROUTER";
@@ -44,14 +124,16 @@ export type AgentMessage = {
   content: string;
 };
 
-const MAX_AGENT_ROUNDS = 6;
 /**
- * Ceiling on total tool calls per request so a looping model cannot run up cost.
- * Sized to fit a realistic dictation batch — someone listing a day's spending
- * can easily reach a dozen entries, and silently dropping the tail would be
- * worse than the extra tokens.
+ * Batas putaran dan batas panggilan tool sekarang datang dari node "Penalaran
+ * LLM" dan "Eksekutor Tool" di Agent Studio. Nilai bawaannya (6 dan 30) hidup
+ * di src/ai/graph/catalogue.ts, dan graph.test.ts menjaga agar tetap sama
+ * dengan yang dulu di-hardcode di sini.
+ *
+ * Batas panggilan tool tetap ada karena satu alasan: model yang berputar bisa
+ * membakar biaya tanpa henti. Ukurannya pas untuk satu batch dikte belanja
+ * sehari — memotong ekornya diam-diam lebih buruk daripada token tambahannya.
  */
-const MAX_TOOL_CALLS = 30;
 const ALWAYS_MUTATING_TOOLS = new Set<AgentToolName>([
   "createTransaction",
   "updateTransaction",
@@ -114,27 +196,50 @@ function formatAmount(value: number, currency: string): string {
     : `${currency} ${value.toFixed(2)}`;
 }
 
-async function loadUserContext(userId: string, message: string): Promise<string> {
+/**
+ * Merangkai konteks keuangan sesuai node "Konteks Keuangan" di Agent Studio.
+ *
+ * Tiap blok diambil hanya kalau dinyalakan. Ini bukan sekadar memotong prompt:
+ * masing-masing blok adalah satu query, jadi mematikan yang tidak terpakai
+ * benar-benar mengurangi beban per pesan.
+ */
+async function loadUserContext(
+  userId: string,
+  message: string,
+  ctx: NonNullable<ChatPlan["context"]>,
+): Promise<string> {
   try {
     const [memories, settings, recentTxs, goals, wallets, budgetReport, prediction, insights] =
       await Promise.all([
-        prisma.aiMemory.findMany({ where: { userId }, orderBy: { updatedAt: "desc" }, take: 60 }),
+        ctx.memories && ctx.memoryLimit > 0
+          ? prisma.aiMemory.findMany({
+              where: { userId },
+              orderBy: { updatedAt: "desc" },
+              take: ctx.memoryLimit,
+            })
+          : [],
+        // Selalu dibaca: timezone dan mata uang menentukan cara setiap angka
+        // lain ditulis, jadi ini bukan blok yang bisa dimatikan.
         prisma.userSettings.findUnique({ where: { userId } }),
-        prisma.transaction.findMany({
-          where: { userId },
-          orderBy: { transactionDate: "desc" },
-          take: 12,
-          include: { category: true, wallet: true },
-        }),
-        FinanceEngine.listGoals(userId).catch(() => []),
-        FinanceEngine.listWallets(userId).catch(() => []),
-        FinanceEngine.analyzeBudget(userId).catch(() => null),
-        FinanceEngine.predictMonthEnd(userId).catch(() => null),
-        prisma.aiInsight.findMany({
-          where: { userId },
-          orderBy: { createdAt: "desc" },
-          take: 3,
-        }),
+        ctx.recentTransactions && ctx.transactionLimit > 0
+          ? prisma.transaction.findMany({
+              where: { userId },
+              orderBy: { transactionDate: "desc" },
+              take: ctx.transactionLimit,
+              include: { category: true, wallet: true },
+            })
+          : [],
+        ctx.goals ? FinanceEngine.listGoals(userId).catch(() => []) : [],
+        ctx.wallets ? FinanceEngine.listWallets(userId).catch(() => []) : [],
+        ctx.budget ? FinanceEngine.analyzeBudget(userId).catch(() => null) : null,
+        ctx.prediction ? FinanceEngine.predictMonthEnd(userId).catch(() => null) : null,
+        ctx.insights && ctx.insightLimit > 0
+          ? prisma.aiInsight.findMany({
+              where: { userId },
+              orderBy: { createdAt: "desc" },
+              take: ctx.insightLimit,
+            })
+          : [],
       ]);
 
     const currency = settings?.currency ?? "IDR";
@@ -221,6 +326,8 @@ export async function runFinanceAgent(params: {
   message: string;
   config: AiRuntimeConfig;
   channel?: "TELEGRAM" | "WEB";
+  /** Disuntikkan oleh dry-run Agent Studio agar draft bisa diuji sebelum dipublish. */
+  plan?: ChatPlan;
 }): Promise<AgentReply> {
   const { userId, message, config, channel = "WEB" } = params;
   if (!config.apiKey) {
@@ -230,8 +337,33 @@ export async function runFinanceAgent(params: {
     };
   }
 
-  const history = await loadHistory(userId, channel);
-  const reply = await runOpenRouter({ userId, message, config, channel, history });
+  const plan = params.plan ?? (await loadChatPlan());
+  const trace = createChatTracer(plan, channel);
+
+  // Kanal yang dimatikan di node pemicu ditolak di sini, sebelum satu token pun
+  // dibelanjakan.
+  if (!plan.channels.includes(channel)) {
+    trace.node("trigger.chat", "skipped", `kanal ${channel} tidak dilayani`);
+    trace.end("ok", []);
+    return {
+      text: "Agent sedang tidak melayani kanal ini. Coba lewat kanal lain atau hubungi admin.",
+      toolsUsed: [],
+    };
+  }
+  trace.node("trigger.chat", "ok", channel);
+
+  const historyStartedAt = Date.now();
+  const history = plan.conversation
+    ? await loadHistory(userId, channel, plan.conversation)
+    : [];
+  trace.node(
+    "memory.conversation",
+    plan.conversation ? "ok" : "skipped",
+    plan.conversation ? `${history.length} pesan` : undefined,
+    Date.now() - historyStartedAt,
+  );
+
+  const reply = await runOpenRouter({ userId, message, config, channel, history, plan, trace });
 
   // Recorded here rather than at each return inside the model loop: there are a
   // dozen exit paths and a missed one would be free tokens.
@@ -244,11 +376,20 @@ export async function runFinanceAgent(params: {
     });
   }
 
-  await appendHistory(userId, channel, [
-    { role: "user", content: message },
-    { role: "assistant", content: reply.text },
-  ]);
+  if (plan.conversation) {
+    await appendHistory(
+      userId,
+      channel,
+      [
+        { role: "user", content: message },
+        { role: "assistant", content: reply.text },
+      ],
+      plan.conversation,
+    );
+  }
 
+  trace.node("dispatch.reply", "ok", `${reply.text.length} karakter`);
+  trace.end("ok", reply.toolsUsed);
   return reply;
 }
 
@@ -258,6 +399,8 @@ async function runOpenRouter(params: {
   config: AiRuntimeConfig;
   channel: "TELEGRAM" | "WEB";
   history: AgentMessage[];
+  plan: ChatPlan;
+  trace: RunTracer;
 }): Promise<AgentReply> {
   // The accumulator lives out here so every early return inside the model loop
   // still reports what it spent — there are a dozen exit paths and a missed one
@@ -274,10 +417,24 @@ async function runOpenRouterInner(
     config: AiRuntimeConfig;
     channel: "TELEGRAM" | "WEB";
     history: AgentMessage[];
+    plan: ChatPlan;
+    trace: RunTracer;
   },
   usage: { promptTokens: number; outputTokens: number; model: string },
 ): Promise<AgentReply> {
-  const userContext = await loadUserContext(params.userId, params.message);
+  const { plan, trace } = params;
+  const contextStartedAt = Date.now();
+  const userContext = await loadUserContext(
+    params.userId,
+    params.message,
+    plan.context ?? CONTEXT_ALL_OFF,
+  );
+  trace.node(
+    "context.loader",
+    plan.context ? "ok" : "skipped",
+    undefined,
+    Date.now() - contextStartedAt,
+  );
   const systemPrompt = buildFinanceAgentSystemPrompt({
     channel: params.channel,
     userContext,
@@ -290,25 +447,57 @@ async function runOpenRouterInner(
   const walletPrompts: WalletPrompt[] = [];
   let verifiedWrite = false;
 
+  // Node "Kebijakan Intent" dimatikan berarti tidak ada tool yang diwajibkan:
+  // model bebas menjawab tanpa dipaksa membaca data lebih dulu.
   const intent = classifyDeterministicIntent(params.message);
-  const requiredTool = requiredToolForIntent(intent);
+  const requiredTool = plan.intent ? requiredToolForIntent(intent) : undefined;
   // A read can be forced safely; forcing a write would let a misread intent
   // create a transaction the user never asked for. Writes are only nudged, and
   // a false "tercatat" claim is caught by the guard below instead.
-  const forceableTool = requiredTool === "getFinancialSnapshot" ? requiredTool : undefined;
+  const forceableTool =
+    plan.intent?.forceReadTool && requiredTool === "getFinancialSnapshot"
+      ? requiredTool
+      : undefined;
+  trace.node("policy.intent", plan.intent ? "ok" : "skipped", intent ?? "tanpa intent khusus");
 
   // The model's prose is never proof. Every reply that reaches the user is
   // filtered against what the tools actually returned this turn.
-  const guard = (text: string): string =>
-    enforceGroundedFigures({
-      text: enforceWriteClaim({
-        text,
+  //
+  // Tiap saringan dipasang terpisah sesuai node "Guard Kebenaran": mematikan
+  // salah satunya di kanvas benar-benar melepas saringan itu, bukan sekadar
+  // mengubah tampilan.
+  const guard = (text: string): string => {
+    let result = text;
+    if (plan.guard?.enforceWriteClaim) {
+      result = enforceWriteClaim({
+        text: result,
         hasVerifiedWrite: verifiedWrite,
         writeIntended: writeAttempted || intent === "CREATE_TRANSACTION",
-      }),
-      intent,
-      ranRequiredRead: toolsUsed.some((name) => GROUNDING_READ_TOOLS.has(name)),
-    });
+      });
+    }
+    if (plan.guard?.enforceGroundedFigures) {
+      result = enforceGroundedFigures({
+        text: result,
+        intent,
+        ranRequiredRead: toolsUsed.some((name) => GROUNDING_READ_TOOLS.has(name)),
+      });
+    }
+    // Guard yang mengganti teks adalah guard yang bekerja, bukan kegagalan run —
+    // jadi ini dilaporkan sebagai "ok" dengan keterangan, bukan "error".
+    trace.node(
+      "guard.grounding",
+      plan.guard ? "ok" : "skipped",
+      plan.guard ? (result === text ? "lolos" : "balasan disaring") : undefined,
+    );
+    return result;
+  };
+
+  // Tool yang dimatikan tidak pernah dikirim ke model, jadi mustahil dipanggil.
+  const activeTools = plan.tools
+    ? toolsForOpenAICompatible().filter((tool) => plan.tools!.enabled.includes(tool.function.name))
+    : [];
+  const maxRounds = Math.max(1, Math.round(plan.llm.maxRounds));
+  const maxToolCalls = plan.tools ? Math.max(1, Math.round(plan.tools.maxToolCalls)) : 0;
 
   type Msg = {
     role: "system" | "user" | "assistant" | "tool";
@@ -317,7 +506,7 @@ async function runOpenRouterInner(
     tool_call_id?: string;
   };
 
-  const { primary, fallbacks } = buildModelChain(params.config);
+  const { primary, fallbacks } = buildModelChain(params.config, plan);
   let lastError = "Unknown";
 
   for (const currentModel of [primary, ...fallbacks]) {
@@ -333,7 +522,9 @@ async function runOpenRouterInner(
     const seenCalls = new Set<string>();
 
     try {
-      for (let round = 0; round < MAX_AGENT_ROUNDS; round++) {
+      for (let round = 0; round < maxRounds; round++) {
+        const roundStartedAt = Date.now();
+        trace.node("llm.reasoner", "running", `putaran ${round + 1}/${maxRounds}`);
         const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
           method: "POST",
           headers: {
@@ -345,12 +536,18 @@ async function runOpenRouterInner(
           body: JSON.stringify({
             model: currentModel,
             messages,
-            tools: toolsForOpenAICompatible(),
-            tool_choice:
-              forceRequiredTool && forceableTool
-                ? { type: "function", function: { name: forceableTool } }
-                : "auto",
-            temperature: 0.2,
+            // Kunci tools dihilangkan sama sekali kalau tidak ada tool aktif —
+            // array kosong ditolak sebagian penyedia.
+            ...(activeTools.length > 0
+              ? {
+                  tools: activeTools,
+                  tool_choice:
+                    forceRequiredTool && forceableTool
+                      ? { type: "function", function: { name: forceableTool } }
+                      : "auto",
+                }
+              : {}),
+            temperature: plan.llm.temperature,
           }),
         });
 
@@ -373,6 +570,7 @@ async function runOpenRouterInner(
 
         const msg = json.choices[0]?.message;
         if (!msg) throw new Error("Empty response");
+        trace.node("llm.reasoner", "ok", currentModel, Date.now() - roundStartedAt);
 
         if (msg.tool_calls?.length) {
           forceRequiredTool = false;
@@ -383,11 +581,17 @@ async function runOpenRouterInner(
             try { args = JSON.parse(call.function.arguments || "{}"); } catch { args = {}; }
             const name = call.function.name as AgentToolName;
             const signature = `${name}:${JSON.stringify(args)}`;
-            const blocked = seenCalls.has(signature)
+            const duplicate = plan.tools?.dedupeIdenticalCalls === true && seenCalls.has(signature);
+            // Tool yang dimatikan di kanvas tidak pernah dikirim ke model, tapi
+            // model yang mengarang nama tool tetap harus ditolak di sini.
+            const disabled = !plan.tools || !plan.tools.enabled.includes(name);
+            const blocked = duplicate
               ? "Panggilan tool ini identik dengan yang sudah dijalankan di percakapan ini. Hasilnya tidak berubah — jangan ulangi, jawab dari hasil sebelumnya."
-              : toolsUsed.length >= MAX_TOOL_CALLS
-                ? "Batas jumlah tool per permintaan tercapai. Jawab sekarang dari data yang sudah ada."
-                : null;
+              : disabled
+                ? "Tool ini sedang dinonaktifkan oleh admin. Jawab dari data yang sudah ada."
+                : toolsUsed.length >= maxToolCalls
+                  ? "Batas jumlah tool per permintaan tercapai. Jawab sekarang dari data yang sudah ada."
+                  : null;
             if (!blocked) {
               seenCalls.add(signature);
               toolsUsed.push(name);
@@ -397,6 +601,12 @@ async function runOpenRouterInner(
           });
 
           const executable = planned.filter((call) => !call.blocked);
+          const toolsStartedAt = Date.now();
+          trace.node(
+            "tools.executor",
+            "running",
+            executable.map((call) => call.name).join(", ") || "semua ditolak",
+          );
           const executed = await executeToolsParallel(
             params.userId,
             executable.map((call) => ({ name: call.name, args: call.args })),
@@ -406,6 +616,15 @@ async function runOpenRouterInner(
           executable.forEach((call, index) => {
             resultBySignature.set(call.id, executed[index]?.result);
           });
+          const blockedCount = planned.length - executable.length;
+          trace.node(
+            "tools.executor",
+            "ok",
+            blockedCount > 0
+              ? `${executable.length} jalan, ${blockedCount} ditolak`
+              : `${executable.length} tool`,
+            Date.now() - toolsStartedAt,
+          );
 
           const clientMessages: string[] = [];
           let executedCount = 0;
@@ -473,7 +692,7 @@ async function runOpenRouterInner(
         // A required finance tool was never called, so the model is about to
         // answer a money question from its own imagination. Force the tool at
         // the transport layer rather than trusting the prose.
-        if (requiredTool && !toolsUsed.includes(requiredTool) && round < MAX_AGENT_ROUNDS - 1) {
+        if (requiredTool && !toolsUsed.includes(requiredTool) && round < maxRounds - 1) {
           forceRequiredTool = true;
           messages.push({ role: "assistant", content: msg.content });
           messages.push({
@@ -489,6 +708,7 @@ async function runOpenRouterInner(
       return { text: incompleteAgentReply(writeAttempted && walletPrompts.length === 0), toolsUsed, data, walletPrompt: walletPrompts[0], walletPrompts };
     } catch (error) {
       lastError = error instanceof Error ? error.message : "Unknown";
+      trace.node("llm.reasoner", "error", lastError.slice(0, 120));
       // Tool sudah menulis ke database — mencoba model lain akan menjalankannya ulang.
       if (toolsUsed.length > 0) {
         console.error("[finance-agent] Provider failed after tool execution", {
@@ -515,8 +735,19 @@ async function runOpenRouterInner(
   };
 }
 
-function buildModelChain(config: AiRuntimeConfig): { primary: string; fallbacks: string[] } {
-  const primary = config.model || "openai/gpt-4o-mini";
+/**
+ * Model utama & cadangan tetap milik konfigurasi platform (/ai).
+ *
+ * Node LLM hanya boleh MENIMPA-nya, bukan menduplikasi: kalau daftar model ada
+ * di dua tempat, cepat atau lambat keduanya berbeda dan tidak ada yang tahu
+ * mana yang sebenarnya dipakai.
+ */
+function buildModelChain(
+  config: AiRuntimeConfig,
+  plan: ChatPlan,
+): { primary: string; fallbacks: string[] } {
+  const primary = plan.llm.modelOverride || config.model || "openai/gpt-4o-mini";
+  if (!plan.llm.useFallbackModels) return { primary, fallbacks: [] };
   const fallbacks = (config.fallbackModels ?? []).filter((m) => m && m !== primary).slice(0, 2);
   return { primary, fallbacks };
 }

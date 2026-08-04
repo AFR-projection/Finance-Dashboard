@@ -49,6 +49,19 @@ enum UsageSource {
   HEARTBEAT
 }
 
+/// Hasil satu siklus heartbeat.
+///
+/// SKIPPED bukan kegagalan — user FREE, tidak ada yang layak dikirim, atau tidak
+/// ada API key. Dibedakan dari FAILED supaya panel admin tidak menyalakan alarm
+/// untuk kondisi yang memang normal.
+enum HeartbeatStatus {
+  RUNNING
+  SENT
+  SAVED
+  SKIPPED
+  FAILED
+}
+
 /// One paid period. Downgrade is computed at request time from
 /// `currentPeriodEnd`, so no cron job can silently fail to demote anyone.
 model Subscription {
@@ -160,6 +173,7 @@ model User {
   pendingTransactions PendingTransaction[]
   wallets       Wallet[]
   pushSubscriptions PushSubscription[]
+  heartbeatRuns HeartbeatRun[]
 
   @@index([createdAt])
   @@map("users")
@@ -381,6 +395,32 @@ model AiInsight {
   @@map("ai_insights")
 }
 
+/// Satu baris per (user, periode) — ditulis untuk SETIAP hasil, termasuk skip.
+///
+/// Dulu duplikat dijaga dengan mencari baris AiInsight, tapi baris itu hanya
+/// lahir kalau siklusnya sukses penuh. Akibatnya tiap hasil skip tidak
+/// meninggalkan jejak dan tick berikutnya (60 detik kemudian) mengulang seluruh
+/// pengumpulan sinyal — selamanya. Penanda ini yang sekarang jadi penjaga, jadi
+/// keputusan "tidak mengirim" pun hanya diambil sekali per periode.
+model HeartbeatRun {
+  id         String          @id @default(cuid())
+  userId     String          @map("user_id")
+  periodKey  String          @map("period_key")
+  cadence    String
+  status     HeartbeatStatus
+  /// Alasan mesin, mis. "not-premium" / "all-models-failed". Null saat terkirim.
+  reason     String?
+  startedAt  DateTime        @default(now()) @map("started_at")
+  finishedAt DateTime?       @map("finished_at")
+  durationMs Int?            @map("duration_ms")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, periodKey])
+  @@index([startedAt])
+  @@map("heartbeat_runs")
+}
+
 model ShareProfile {
   id          String          @id @default(cuid())
   userId      String          @unique @map("user_id")
@@ -575,6 +615,48 @@ model AppConfig {
   updatedAt            DateTime @updatedAt @map("updated_at")
 
   @@map("app_config")
+}
+
+/// Pipeline AI agent sebagai data, bukan konstanta di kode.
+///
+/// Dua sisi yang sengaja dipisah: `nodes`/`edges` adalah yang dibaca runtime,
+/// `draftNodes`/`draftEdges` adalah yang sedang digeser-geser admin di kanvas.
+/// Tanpa pemisahan ini, satu node yang tidak sengaja tergeser langsung mengubah
+/// perilaku agent yang sedang melayani user sungguhan.
+model AgentGraph {
+  id          String    @id @default("singleton")
+  /// Naik satu tiap publish. 0 berarti belum pernah dipublish — runtime memakai DEFAULT_GRAPH.
+  version     Int       @default(0)
+  nodes       Json      @default("[]")
+  edges       Json      @default("[]")
+  /// Null berarti tidak ada perubahan tertunda.
+  draftNodes  Json?
+  draftEdges  Json?
+  publishedAt DateTime? @map("published_at")
+  updatedBy   String?   @map("updated_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("agent_graph")
+}
+
+/// Satu baris per publish, supaya perubahan yang merusak bisa dikembalikan.
+///
+/// Sengaja bukan relasi ke User: barisnya harus selamat kalau akun admin yang
+/// mem-publish dihapus, sama seperti AdminAuditLog.
+model AgentGraphRevision {
+  id          String   @id @default(cuid())
+  version     Int
+  nodes       Json
+  edges       Json
+  actorUserId String?  @map("actor_user_id")
+  actorName   String?  @map("actor_name")
+  note        String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([version])
+  @@index([createdAt])
+  @@map("agent_graph_revisions")
 }
 
 /// Every state-changing action taken from the master admin panel.

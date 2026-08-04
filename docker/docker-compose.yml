@@ -89,6 +89,32 @@ services:
     entrypoint: ["npx", "tsx", "workers/telegram/index.ts"]
     logging: *default-logging
 
+  # Penjadwalan laporan proaktif. Prosesnya sendiri, bukan interval di dalam app:
+  # interval di web akan berjalan dua kali begitu ada instance kedua, dan restart
+  # tiap deploy. Sebelumnya service ini hilang dari compose sementara PM2 punya —
+  # itu sebabnya heartbeat tidak pernah jalan di produksi.
+  heartbeat-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        DATABASE_URL: postgresql://build:build@127.0.0.1:5432/build?schema=public
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      NEXT_PUBLIC_APP_URL: http://app:3000
+      DOCKER: "1"
+      SKIP_DB_PUSH: "1"
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - ledgerly_net
+    entrypoint: ["npx", "tsx", "workers/heartbeat/index.ts"]
+    logging: *default-logging
+
 volumes:
   redis_data:
 

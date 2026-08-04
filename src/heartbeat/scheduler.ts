@@ -7,9 +7,13 @@
  */
 
 import pino from "pino";
+import type { HeartbeatStatus } from "@prisma/client";
 import { resolveAiConfig } from "@/ai/resolve-config";
 import { requireAiAccess } from "@/ai/entitlement";
+import type { HeartbeatPlan } from "@/ai/graph/compile";
+import { loadHeartbeatPlan } from "@/ai/graph/store";
 import { exportTransactionsCsv } from "@/finance-engine/export";
+import { emitAgentEvent, newRunId } from "@/lib/agent-telemetry";
 import { prisma } from "@/lib/db";
 import { analyzeHeartbeat } from "./analyst";
 import { dispatchHeartbeat } from "./dispatch";
@@ -18,6 +22,29 @@ import { collectSnapshot } from "./signals";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 
 export type Cadence = "daily" | "weekly" | "monthly";
+
+/**
+ * Hasil satu siklus, selalu dengan alasan yang bisa dibaca manusia.
+ *
+ * Dulu semua jalan buntu mengembalikan string "skipped" telanjang tanpa satu
+ * baris log pun. Di platform baru — semua akun masih FREE — itu berarti setiap
+ * user dibuang diam-diam dan tidak ada cara untuk tahu bedanya dengan worker
+ * yang mati.
+ */
+export type HeartbeatOutcome = {
+  status: "sent" | "saved" | "skipped" | "failed";
+  reason?: string;
+};
+
+const OUTCOME_TO_STATUS: Record<HeartbeatOutcome["status"], HeartbeatStatus> = {
+  sent: "SENT",
+  saved: "SAVED",
+  skipped: "SKIPPED",
+  failed: "FAILED",
+};
+
+/** Sesudah ini, sebuah klaim RUNNING dianggap milik proses yang sudah mati. */
+const STALE_CLAIM_MS = 15 * 60_000;
 
 type LocalClock = { hour: number; isoDate: string; weekday: number; dayOfMonth: number };
 
@@ -82,37 +109,178 @@ export function periodKeyFor(cadence: Cadence, isoDate: string): string {
 export function dueCadence(params: {
   clock: LocalClock;
   heartbeatHour: number;
+  /** Dari node "Penjadwal". Dihilangkan = ketiganya aktif, seperti sebelum ada kanvas. */
+  cadences?: { daily: boolean; weekly: boolean; monthly: boolean };
 }): Cadence | null {
+  const cadences = params.cadences ?? { daily: true, weekly: true, monthly: true };
   if (params.clock.hour < params.heartbeatHour) return null;
-  if (params.clock.dayOfMonth === 1) return "monthly";
-  return params.clock.weekday === 1 ? "weekly" : "daily";
+
+  // Cadence yang dimatikan tidak memblokir yang di bawahnya: tanggal 1 dengan
+  // laporan tutup bulan dimatikan harus tetap menerima brief harian, bukan diam.
+  if (params.clock.dayOfMonth === 1 && cadences.monthly) return "monthly";
+  if (params.clock.weekday === 1 && cadences.weekly) return "weekly";
+  return cadences.daily ? "daily" : null;
 }
 
 export async function runHeartbeatForUser(params: {
   userId: string;
   cadence: Cadence;
   periodKey: string;
-}): Promise<"sent" | "saved" | "skipped"> {
+  /** Rencana dari Agent Studio. Dihilangkan = dimuat dari graph yang dipublish. */
+  plan?: HeartbeatPlan;
+}): Promise<HeartbeatOutcome> {
   const { userId, cadence, periodKey } = params;
+  const plan = params.plan ?? (await loadHeartbeatPlan());
 
-  const snapshot = await collectSnapshot(userId, cadence);
+  const runId = newRunId();
+  const runStartedAt = Date.now();
+  const at = () => new Date().toISOString();
+  const node = (
+    kind: keyof typeof plan.nodeIds,
+    status: "running" | "ok" | "skipped" | "error",
+    detail?: string,
+    ms?: number,
+  ) => {
+    const nodeId = plan.nodeIds[kind];
+    if (!nodeId) return;
+    emitAgentEvent({ type: "node", runId, nodeId, kind, status, ms, detail, at: at() });
+  };
+  const finish = (outcome: HeartbeatOutcome): HeartbeatOutcome => {
+    emitAgentEvent({
+      type: "run:end",
+      runId,
+      status: outcome.status === "failed" ? "error" : "ok",
+      ms: Date.now() - runStartedAt,
+      at: at(),
+    });
+    return outcome;
+  };
 
-  // Heartbeat is a Premium feature; FREE accounts are skipped silently rather
-  // than nagged, since nobody asked for this message.
+  emitAgentEvent({
+    type: "run:start",
+    runId,
+    track: "heartbeat",
+    channel: cadence,
+    at: at(),
+  });
+
+  // Diperiksa SEBELUM snapshot, bukan sesudah.
+  //
+  // Heartbeat adalah fitur Premium, dan akun FREE ditolak setiap kali. Urutan
+  // lama tetap menjalankan collectSnapshot — delapan query paralel — lalu
+  // membuang hasilnya. Dikalikan jumlah user dan diulang tiap menit, itu beban
+  // database yang tidak menghasilkan apa pun.
   try {
     await requireAiAccess(userId, "HEARTBEAT");
   } catch {
-    return "skipped";
+    node("trigger.schedule", "skipped", "bukan Premium");
+    return finish({ status: "skipped", reason: "not-premium" });
   }
+  node("trigger.schedule", "ok", cadence);
+
+  const signalsStartedAt = Date.now();
+  const snapshot = await collectSnapshot(userId, cadence);
+  node("signals.collect", "ok", undefined, Date.now() - signalsStartedAt);
 
   const config = await resolveAiConfig(userId);
-  const analysis = await analyzeHeartbeat({ snapshot, config, userId });
+  const analystStartedAt = Date.now();
+  node("llm.analyst", "running", plan.analyst.modelOverride || config.model);
+  const analysis = await analyzeHeartbeat({ snapshot, config, userId, analyst: plan.analyst });
 
-  if (!analysis) return "skipped";
+  if (!analysis.ok) {
+    node("llm.analyst", "error", analysis.reason, Date.now() - analystStartedAt);
+    return finish({ status: "skipped", reason: analysis.reason });
+  }
+  node(
+    "llm.analyst",
+    "ok",
+    analysis.analysis.shouldSend ? "layak dikirim" : "tidak layak dikirim",
+    Date.now() - analystStartedAt,
+  );
 
-  const attachment = cadence === "monthly" ? await buildMonthlyRecap(userId, periodKey) : undefined;
-  const result = await dispatchHeartbeat({ userId, periodKey, analysis, attachment });
-  return result.telegram + result.push + (result.document ? 1 : 0) > 0 ? "sent" : "saved";
+  const wantsAttachment = cadence === "monthly" && plan.dispatch.monthlyAttachment;
+  const attachment = wantsAttachment ? await buildMonthlyRecap(userId, periodKey) : undefined;
+  const result = await dispatchHeartbeat({
+    userId,
+    periodKey,
+    analysis: analysis.analysis,
+    attachment,
+    channels: { telegram: plan.dispatch.telegram, webPush: plan.dispatch.webPush },
+  });
+
+  const reached = result.telegram + result.push + (result.document ? 1 : 0);
+  node(
+    "dispatch.notify",
+    "ok",
+    reached > 0 ? `${reached} kanal` : "tersimpan tanpa notifikasi",
+  );
+  if (reached > 0) return finish({ status: "sent" });
+
+  // Tersimpan tapi tidak sampai ke siapa pun. Tiga sebab yang sangat berbeda:
+  // analis memutuskan tidak ada yang layak mengganggu user, user belum menautkan
+  // satu kanal pun, atau admin memang mematikan semua kanal di Agent Studio.
+  if (!analysis.analysis.shouldSend) {
+    return finish({ status: "saved", reason: "nothing-worth-sending" });
+  }
+  const anyChannelOn = plan.dispatch.telegram || plan.dispatch.webPush;
+  return finish({ status: "saved", reason: anyChannelOn ? "no-channel" : "channels-disabled" });
+}
+
+/**
+ * Mengambil periode secara atomik lewat unique index (user_id, period_key).
+ *
+ * Klaim ditulis sebelum pekerjaan dimulai, bukan sesudah, supaya hasil apa pun —
+ * termasuk skip dan crash — meninggalkan jejak. Itu yang membuat siklus ini
+ * berhenti mengulang dirinya tiap 60 detik.
+ */
+async function claimPeriod(params: {
+  userId: string;
+  periodKey: string;
+  cadence: Cadence;
+  now: Date;
+}): Promise<string | null> {
+  const { userId, periodKey, cadence, now } = params;
+
+  // Klaim yang tidak pernah melapor balik berarti prosesnya mati di tengah
+  // siklus. Tanpa pembersihan ini periode tersebut terkunci selamanya dan user
+  // tidak akan pernah menerima laporan lagi.
+  await prisma.heartbeatRun.deleteMany({
+    where: {
+      userId,
+      periodKey,
+      status: "RUNNING",
+      startedAt: { lt: new Date(now.getTime() - STALE_CLAIM_MS) },
+    },
+  });
+
+  try {
+    const claim = await prisma.heartbeatRun.create({
+      data: { userId, periodKey, cadence, status: "RUNNING", startedAt: now },
+      select: { id: true },
+    });
+    return claim.id;
+  } catch (err) {
+    // P2002 = periode ini sudah tercatat, entah selesai sebelumnya atau sedang
+    // dikerjakan proses worker lain saat ini juga.
+    if (typeof err === "object" && err !== null && (err as { code?: string }).code === "P2002") {
+      return null;
+    }
+    throw err;
+  }
+}
+
+async function finishRun(id: string, outcome: HeartbeatOutcome, startedAtMs: number) {
+  await prisma.heartbeatRun
+    .update({
+      where: { id },
+      data: {
+        status: OUTCOME_TO_STATUS[outcome.status],
+        reason: outcome.reason ?? null,
+        finishedAt: new Date(),
+        durationMs: Date.now() - startedAtMs,
+      },
+    })
+    .catch((err) => log.warn({ err, id }, "Gagal menandai hasil heartbeat"));
 }
 
 /**
@@ -153,6 +321,11 @@ async function buildMonthlyRecap(userId: string, periodKey: string) {
 
 /** One scheduler tick: finds users whose local clock just hit their heartbeat hour. */
 export async function tickHeartbeat(now = new Date()): Promise<number> {
+  // Dimuat sekali per tick, bukan per user: satu tick adalah satu keputusan
+  // penjadwalan, dan graph yang berubah di tengahnya akan membuat sebagian user
+  // dijadwalkan dengan aturan lama dan sebagian dengan aturan baru.
+  const plan = await loadHeartbeatPlan();
+
   const settings = await prisma.userSettings.findMany({
     where: { heartbeatEnabled: true },
     select: { userId: true, timezone: true, heartbeatHour: true },
@@ -162,21 +335,49 @@ export async function tickHeartbeat(now = new Date()): Promise<number> {
 
   for (const setting of settings) {
     const clock = localClock(setting.timezone, now);
-    const cadence = dueCadence({ clock, heartbeatHour: setting.heartbeatHour });
+    // Jam pilihan user selalu menang; jam dari node hanya menutup baris lama
+    // yang nilainya di luar rentang jam.
+    const hour =
+      Number.isInteger(setting.heartbeatHour) &&
+      setting.heartbeatHour >= 0 &&
+      setting.heartbeatHour <= 23
+        ? setting.heartbeatHour
+        : plan.schedule.defaultHour;
+    const cadence = dueCadence({
+      clock,
+      heartbeatHour: hour,
+      cadences: {
+        daily: plan.schedule.daily,
+        weekly: plan.schedule.weekly,
+        monthly: plan.schedule.monthly,
+      },
+    });
     if (!cadence) continue;
 
     const periodKey = periodKeyFor(cadence, clock.isoDate);
-    const already = await prisma.aiInsight.findFirst({
-      where: { userId: setting.userId, periodKey },
-      select: { id: true },
-    });
-    if (already) continue;
 
+    // Penjaga duplikat dulu membaca baris AiInsight, yang hanya lahir kalau
+    // siklusnya sukses penuh — jadi setiap skip lolos dan diulang tiap menit.
+    const claimId = await claimPeriod({ userId: setting.userId, periodKey, cadence, now });
+    if (!claimId) continue;
+
+    const startedAtMs = Date.now();
     try {
-      const outcome = await runHeartbeatForUser({ userId: setting.userId, cadence, periodKey });
-      log.info({ userId: setting.userId, periodKey, outcome }, "Siklus heartbeat selesai");
-      if (outcome !== "skipped") ran += 1;
+      const outcome = await runHeartbeatForUser({
+        userId: setting.userId,
+        cadence,
+        periodKey,
+        plan,
+      });
+      await finishRun(claimId, outcome, startedAtMs);
+      log.info(
+        { userId: setting.userId, periodKey, status: outcome.status, reason: outcome.reason },
+        "Siklus heartbeat selesai",
+      );
+      if (outcome.status !== "skipped") ran += 1;
     } catch (err) {
+      const reason = err instanceof Error ? err.message.slice(0, 300) : "unknown";
+      await finishRun(claimId, { status: "failed", reason }, startedAtMs);
       log.error({ err, userId: setting.userId, periodKey }, "Siklus heartbeat gagal");
     }
   }

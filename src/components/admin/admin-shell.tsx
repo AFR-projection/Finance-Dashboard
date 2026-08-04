@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Tags,
   Users,
+  Workflow,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,7 @@ const NAV = [
     group: "Platform",
     items: [
       { href: "/ai", label: "AI & Model", icon: BrainCircuit },
+      { href: "/agent", label: "Agent Studio", icon: Workflow },
       { href: "/plans", label: "Paket & Harga", icon: Tags },
       { href: "/security", label: "Keamanan", icon: ShieldCheck },
       { href: "/system", label: "Sistem", icon: ServerCog },

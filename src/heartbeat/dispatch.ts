@@ -15,6 +15,16 @@ import type { HeartbeatAnalysis } from "./analyst";
 
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 
+/**
+ * Kanal yang boleh dipakai, dari node "Kirim Laporan" di Agent Studio.
+ *
+ * Insight selalu tersimpan apa pun isinya — itu yang membuat dashboard jujur
+ * soal apa yang dilihat analis. Yang bisa dimatikan hanyalah gangguannya.
+ */
+export type HeartbeatChannels = { telegram: boolean; webPush: boolean };
+
+export const DEFAULT_HEARTBEAT_CHANNELS: HeartbeatChannels = { telegram: true, webPush: true };
+
 export function heartbeatMessageText(analysis: HeartbeatAnalysis): string {
   const parts = [analysis.title, "", analysis.body];
   if (analysis.actions.length > 0) {
@@ -29,8 +39,11 @@ export async function dispatchHeartbeat(params: {
   analysis: HeartbeatAnalysis;
   /** Attached to the Telegram message when a monthly recap is due. */
   attachment?: { filename: string; content: string; caption: string };
+  /** Dari node "Kirim Laporan". Dihilangkan = semua kanal aktif seperti dulu. */
+  channels?: HeartbeatChannels;
 }): Promise<{ saved: boolean; telegram: number; push: number; document: boolean }> {
   const { userId, periodKey, analysis, attachment } = params;
+  const channels = params.channels ?? DEFAULT_HEARTBEAT_CHANNELS;
 
   await FinanceEngine.saveAiInsights(userId, periodKey, [
     {
@@ -52,23 +65,29 @@ export async function dispatchHeartbeat(params: {
   }
 
   const [telegram, push] = await Promise.all([
-    notifyLinkedChannels(userId, heartbeatMessageText(analysis)).catch((err) => {
-      log.warn({ err, userId }, "Heartbeat Telegram gagal");
-      return [] as string[];
-    }),
-    sendWebPush(userId, {
-      title: analysis.title,
-      body: analysis.body.slice(0, 240),
-      url: "/dashboard/insights",
-      tag: `heartbeat:${periodKey}`,
-    }).catch((err) => {
-      log.warn({ err, userId }, "Heartbeat web push gagal");
-      return { sent: 0, removed: 0 };
-    }),
+    channels.telegram
+      ? notifyLinkedChannels(userId, heartbeatMessageText(analysis)).catch((err) => {
+          log.warn({ err, userId }, "Heartbeat Telegram gagal");
+          return [] as string[];
+        })
+      : Promise.resolve([] as string[]),
+    channels.webPush
+      ? sendWebPush(userId, {
+          title: analysis.title,
+          body: analysis.body.slice(0, 240),
+          url: "/dashboard/insights",
+          tag: `heartbeat:${periodKey}`,
+        }).catch((err) => {
+          log.warn({ err, userId }, "Heartbeat web push gagal");
+          return { sent: 0, removed: 0 };
+        })
+      : Promise.resolve({ sent: 0, removed: 0 }),
   ]);
 
   let document = false;
-  if (attachment) {
+  // Lampiran hanya bisa lewat Telegram, jadi kanal Telegram yang dimatikan juga
+  // mematikan lampirannya — bukan mencoba lalu gagal diam-diam.
+  if (attachment && channels.telegram) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { telegramChatId: true },

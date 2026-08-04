@@ -5,6 +5,7 @@ import next from "next";
 import { Server as SocketIOServer } from "socket.io";
 import { setSocketServer } from "./src/lib/socket-server";
 import { ADMIN_ROOM, startAdminPulse } from "./src/lib/admin-realtime";
+import { startAgentTelemetryBridge } from "./src/lib/agent-telemetry";
 // Not `admin-session`: that module pulls in `next/headers`, which throws on
 // import outside a Next request runtime — and this file is plain Node.
 import { ADMIN_COOKIE, readCookieHeader, verifyAdminToken } from "./src/lib/admin-token";
@@ -105,6 +106,9 @@ app.prepare().then(() => {
 
   setSocketServer(io);
   startAdminPulse(io, isAdminHandshake);
+  // Worker Telegram & heartbeat adalah proses terpisah tanpa server socket.
+  // Tanpa jembatan ini, node mereka tidak akan pernah berkedip di Agent Studio.
+  startAgentTelemetryBridge();
 
   io.on("connection", (socket) => {
     socket.on("login:join", (sessionId: string) => {

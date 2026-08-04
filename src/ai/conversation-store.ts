@@ -1,8 +1,16 @@
 import { redis } from "@/lib/redis";
 import type { AgentMessage } from "./agent";
 
-const MAX_TURNS = 10;
-const TTL_SECONDS = 60 * 60 * 6;
+/**
+ * Batas ini sekarang datang dari node "Riwayat Percakapan" di Agent Studio.
+ *
+ * Nilai di sini tetap dipertahankan sebagai default supaya pemanggil yang tidak
+ * meneruskan limit — dan instalasi yang belum pernah mem-publish graph —
+ * berperilaku persis seperti sebelumnya.
+ */
+export type ConversationLimits = { maxTurns: number; ttlHours: number };
+
+export const DEFAULT_CONVERSATION_LIMITS: ConversationLimits = { maxTurns: 10, ttlHours: 6 };
 
 const memoryStore = new Map<string, { messages: AgentMessage[]; expiresAt: number }>();
 
@@ -16,12 +24,18 @@ function pruneMemoryStore(now: number) {
   }
 }
 
-export async function loadHistory(userId: string, channel: string): Promise<AgentMessage[]> {
+export async function loadHistory(
+  userId: string,
+  channel: string,
+  limits: ConversationLimits = DEFAULT_CONVERSATION_LIMITS,
+): Promise<AgentMessage[]> {
+  // maxTurns 0 berarti node riwayat dimatikan: agent tidak mengingat apa pun.
+  if (limits.maxTurns <= 0) return [];
   const key = storeKey(userId, channel);
 
   if (redis) {
     try {
-      const raw = await redis.lrange(key, -MAX_TURNS * 2, -1);
+      const raw = await redis.lrange(key, -limits.maxTurns * 2, -1);
       return raw.map((entry) => JSON.parse(entry) as AgentMessage);
     } catch {
       // jatuh ke memory store di bawah
@@ -32,24 +46,26 @@ export async function loadHistory(userId: string, channel: string): Promise<Agen
   pruneMemoryStore(now);
   const entry = memoryStore.get(key);
   if (!entry || entry.expiresAt < now) return [];
-  return entry.messages;
+  return entry.messages.slice(-limits.maxTurns * 2);
 }
 
 export async function appendHistory(
   userId: string,
   channel: string,
   messages: AgentMessage[],
+  limits: ConversationLimits = DEFAULT_CONVERSATION_LIMITS,
 ): Promise<void> {
-  if (messages.length === 0) return;
+  if (messages.length === 0 || limits.maxTurns <= 0) return;
   const key = storeKey(userId, channel);
+  const ttlSeconds = Math.max(1, Math.round(limits.ttlHours * 3600));
 
   if (redis) {
     try {
       await redis
         .multi()
         .rpush(key, ...messages.map((m) => JSON.stringify(m)))
-        .ltrim(key, -MAX_TURNS * 2, -1)
-        .expire(key, TTL_SECONDS)
+        .ltrim(key, -limits.maxTurns * 2, -1)
+        .expire(key, ttlSeconds)
         .exec();
       return;
     } catch {
@@ -62,8 +78,8 @@ export async function appendHistory(
   const existing = memoryStore.get(key);
   const combined = [...(existing && existing.expiresAt >= now ? existing.messages : []), ...messages];
   memoryStore.set(key, {
-    messages: combined.slice(-MAX_TURNS * 2),
-    expiresAt: now + TTL_SECONDS * 1000,
+    messages: combined.slice(-limits.maxTurns * 2),
+    expiresAt: now + ttlSeconds * 1000,
   });
 }
 
