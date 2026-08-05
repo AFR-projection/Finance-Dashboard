@@ -410,6 +410,13 @@ model HeartbeatRun {
   status     HeartbeatStatus
   /// Alasan mesin, mis. "not-premium" / "all-models-failed". Null saat terkirim.
   reason     String?
+  /// Pesan asli penyedia atau parser. `reason` menjawab "kategori apa", kolom ini
+  /// menjawab "apa yang sebenarnya terjadi" — tanpa perlu membuka log container.
+  detail     String?
+  /// Berapa kali periode ini dikerjakan. Kegagalan transien melepas klaimnya
+  /// supaya tick berikutnya bisa mencoba lagi; angka inilah yang menghentikan
+  /// pengulangan saat penyebabnya ternyata permanen.
+  attempts   Int             @default(1)
   startedAt  DateTime        @default(now()) @map("started_at")
   finishedAt DateTime?       @map("finished_at")
   durationMs Int?            @map("duration_ms")

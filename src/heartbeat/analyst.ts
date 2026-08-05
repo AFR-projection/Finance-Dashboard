@@ -31,7 +31,19 @@ export type HeartbeatAnalysis = {
  */
 export type HeartbeatAnalysisResult =
   | { ok: true; analysis: HeartbeatAnalysis }
-  | { ok: false; reason: "no-api-key" | "all-models-failed" };
+  | {
+      ok: false;
+      reason: "no-api-key" | "all-models-failed";
+      /**
+       * Pesan asli dari penyedia atau dari parser, satu baris per percobaan.
+       *
+       * Tanpa ini kegagalan hanya meninggalkan dua kata di kolom `reason`, dan
+       * satu-satunya salinan penjelasannya ada di stdout container — yang di VPS
+       * berarti tidak ada. "Semua model gagal" jadi sama tidak berguna dengan
+       * senyap yang seharusnya digantikannya.
+       */
+      detail?: string;
+    };
 
 /**
  * Bagian config yang datang dari node "Analis LLM" di Agent Studio.
@@ -84,38 +96,73 @@ Jawab HANYA satu objek JSON, tanpa penjelasan dan tanpa code fence:
 {"shouldSend":boolean,"title":string,"body":string,"severity":"info"|"good"|"warning"|"critical","actions":string[]}`;
 }
 
-function parseAnalysis(raw: string): HeartbeatAnalysis | null {
+type ParseOutcome =
+  | { ok: true; analysis: HeartbeatAnalysis }
+  | { ok: false; error: string };
+
+/** Cuplikan balasan mentah, cukup untuk mengenali bentuknya tanpa membanjiri log. */
+function snippet(raw: string): string {
+  const flat = raw.replace(/\s+/g, " ").trim();
+  return flat.length > 160 ? `${flat.slice(0, 160)}…` : flat;
+}
+
+function parseAnalysis(raw: string): ParseOutcome {
+  if (!raw.trim()) {
+    return { ok: false, error: "content kosong (model kemungkinan menaruh jawabannya di field reasoning)" };
+  }
+
   // Models still wrap JSON in prose or fences despite the instruction, so take
   // the outermost object rather than trusting the whole string.
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");
-  if (start === -1 || end <= start) return null;
+  if (start === -1 || end <= start) return { ok: false, error: `bukan JSON: ${snippet(raw)}` };
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw.slice(start, end + 1));
   } catch {
-    return null;
+    return { ok: false, error: `JSON rusak: ${snippet(raw)}` };
   }
-  if (typeof parsed !== "object" || parsed === null) return null;
+  if (typeof parsed !== "object" || parsed === null) {
+    return { ok: false, error: `JSON bukan objek: ${snippet(raw)}` };
+  }
 
   const obj = parsed as Record<string, unknown>;
   const title = typeof obj.title === "string" ? obj.title.trim() : "";
   const body = typeof obj.body === "string" ? obj.body.trim() : "";
-  if (!title || !body) return null;
+
+  // "Tidak ada yang layak mengganggu user" adalah jawaban yang memang diminta
+  // prompt, dan model yang menjawabnya sering tidak repot mengisi title/body.
+  // Versi lama menolaknya sebagai balasan rusak, lalu mencoba seluruh rantai
+  // fallback yang menjawab hal yang sama — sehingga keputusan normal tercatat
+  // sebagai "semua model gagal" dan menghanguskan periode hari itu.
+  if (!title || !body) {
+    if (obj.shouldSend === false) {
+      return {
+        ok: true,
+        analysis: { shouldSend: false, title: "", body: "", severity: "info", actions: [] },
+      };
+    }
+    return { ok: false, error: `title/body kosong: ${snippet(raw)}` };
+  }
 
   const severity = ["info", "good", "warning", "critical"].includes(String(obj.severity))
     ? (obj.severity as HeartbeatAnalysis["severity"])
     : "info";
 
   return {
-    shouldSend: obj.shouldSend === true,
-    title: title.slice(0, 80),
-    body: body.slice(0, 900),
-    severity,
-    actions: Array.isArray(obj.actions)
-      ? obj.actions.filter((a): a is string => typeof a === "string" && a.trim().length > 0).slice(0, 3)
-      : [],
+    ok: true,
+    analysis: {
+      shouldSend: obj.shouldSend === true,
+      title: title.slice(0, 80),
+      body: body.slice(0, 900),
+      severity,
+      actions: Array.isArray(obj.actions)
+        ? obj.actions
+            .filter((a): a is string => typeof a === "string" && a.trim().length > 0)
+            .slice(0, 3)
+        : [],
+    },
   };
 }
 
@@ -143,9 +190,24 @@ export async function analyzeHeartbeat(params: {
   const primary = analyst.modelOverride || config.model;
   const models = [primary, ...(config.fallbackModels ?? []).filter((m) => m !== primary)];
 
-  for (const model of models) {
+  /**
+   * Satu panggilan ke satu model.
+   *
+   * `jsonMode` dipisah sebagai parameter karena `response_format` adalah satu-
+   * satunya perbedaan struktural antara jalur ini dan jalur chat yang terbukti
+   * jalan dengan model yang sama. Sebagian penyedia di OpenRouter menerima
+   * permintaannya dengan status 200 lalu mengabaikan atau merusak formatnya —
+   * ditagih token, tapi isinya bukan JSON.
+   */
+  const callModel = async (
+    model: string,
+    jsonMode: boolean,
+  ): Promise<
+    { ok: true; analysis: HeartbeatAnalysis } | { ok: false; error: string; retryPlain: boolean }
+  > => {
+    let res: Response;
     try {
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
@@ -163,39 +225,58 @@ export async function analyzeHeartbeat(params: {
             },
           ],
           temperature: analyst.temperature,
-          response_format: { type: "json_object" },
+          ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
         }),
       });
-
-      if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${await res.text()}`);
-
-      const json = (await res.json()) as {
-        choices?: Array<{ message?: { content?: string | null } }>;
-        usage?: { prompt_tokens?: number; completion_tokens?: number };
-      };
-
-      if (params.userId && json.usage) {
-        await recordAiUsage({
-          userId: params.userId,
-          source: "HEARTBEAT",
-          model,
-          usage: {
-            promptTokens: json.usage.prompt_tokens ?? 0,
-            outputTokens: json.usage.completion_tokens ?? 0,
-          },
-        });
-      }
-
-      const content = json.choices?.[0]?.message?.content ?? "";
-      const analysis = parseAnalysis(content);
-      if (analysis) return { ok: true, analysis };
-
-      throw new Error("Respons bukan JSON analisis yang valid");
     } catch (err) {
-      log.warn({ err, model }, "Heartbeat: model gagal, mencoba fallback");
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: `jaringan: ${message}`, retryPlain: false };
+    }
+
+    if (!res.ok) {
+      const text = (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 200);
+      // 400 sering justru berarti model ini tidak mengenal `response_format`,
+      // jadi khusus itu percobaan tanpa mode JSON masih masuk akal.
+      return { ok: false, error: `HTTP ${res.status}: ${text}`, retryPlain: jsonMode && res.status === 400 };
+    }
+
+    const json = (await res.json().catch(() => null)) as {
+      choices?: Array<{ message?: { content?: string | null } }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    } | null;
+    if (!json) return { ok: false, error: "balasan bukan JSON", retryPlain: false };
+
+    if (params.userId && json.usage) {
+      await recordAiUsage({
+        userId: params.userId,
+        source: "HEARTBEAT",
+        model,
+        usage: {
+          promptTokens: json.usage.prompt_tokens ?? 0,
+          outputTokens: json.usage.completion_tokens ?? 0,
+        },
+      });
+    }
+
+    const parsed = parseAnalysis(json.choices?.[0]?.message?.content ?? "");
+    if (parsed.ok) return parsed;
+    return { ok: false, error: parsed.error, retryPlain: jsonMode };
+  };
+
+  const failures: string[] = [];
+
+  for (const model of models) {
+    for (const jsonMode of [true, false]) {
+      const attempt = await callModel(model, jsonMode);
+      if (attempt.ok) return { ok: true, analysis: attempt.analysis };
+
+      failures.push(`${model}${jsonMode ? "" : " (tanpa json_object)"} → ${attempt.error}`);
+      log.warn({ model, jsonMode, error: attempt.error }, "Heartbeat: percobaan model gagal");
+      if (!attempt.retryPlain) break;
     }
   }
 
-  log.error("Heartbeat dilewati: semua model gagal");
-  return { ok: false, reason: "all-models-failed" };
+  const detail = failures.join(" | ").slice(0, 500);
+  log.error({ detail }, "Heartbeat dilewati: semua model gagal");
+  return { ok: false, reason: "all-models-failed", detail };
 }

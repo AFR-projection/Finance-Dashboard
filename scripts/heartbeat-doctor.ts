@@ -76,6 +76,31 @@ async function main() {
     if (ai.fallbackModels?.length) console.log(`    fallback: ${ai.fallbackModels.join(", ")}`);
   }
 
+  // Nama model adalah teks biasa, jadi tetap terbaca meski key-nya tidak bisa
+  // didekripsi dari mesin ini — dan baris usage membuktikan model mana yang
+  // benar-benar menjawab, bukan sekadar yang dikonfigurasi.
+  const raw = await prisma.appConfig.findFirst({
+    select: { aiModel: true, aiFallbackModels: true },
+  });
+  console.log(`    tersimpan di AppConfig: ${raw?.aiModel || "(kosong)"}${raw?.aiFallbackModels ? ` → ${raw.aiFallbackModels}` : ""}`);
+
+  const spend = await prisma.aiUsageLog.findMany({
+    where: { source: "HEARTBEAT" },
+    orderBy: { createdAt: "desc" },
+    take: 4,
+    select: { createdAt: true, model: true, promptTokens: true, outputTokens: true },
+  });
+  if (spend.length === 0) {
+    console.log(warn("Belum pernah ada panggilan LLM heartbeat yang sampai ke penyedia."));
+  } else {
+    console.log("    panggilan terakhir (token tertagih = penyedia menjawab):");
+    for (const s of spend) {
+      console.log(
+        `      ${s.createdAt.toLocaleString("id-ID")}  ${s.model}  ${s.promptTokens}+${s.outputTokens}`,
+      );
+    }
+  }
+
   console.log("\n── Riwayat siklus ──");
   const byStatus = await prisma.heartbeatRun.groupBy({
     by: ["status"],
@@ -90,14 +115,27 @@ async function main() {
   const recent = await prisma.heartbeatRun.findMany({
     orderBy: { startedAt: "desc" },
     take: 5,
-    select: { periodKey: true, status: true, reason: true, startedAt: true, durationMs: true },
+    select: {
+      periodKey: true,
+      status: true,
+      reason: true,
+      detail: true,
+      attempts: true,
+      startedAt: true,
+      durationMs: true,
+    },
   });
   if (recent.length > 0) {
     console.log("\n  5 terakhir:");
     for (const r of recent) {
       const when = r.startedAt.toLocaleString("id-ID");
       const dur = r.durationMs ? ` ${r.durationMs}ms` : "";
-      console.log(`    ${when}  ${r.periodKey}  ${r.status}${r.reason ? ` (${r.reason})` : ""}${dur}`);
+      const tries = r.attempts > 1 ? ` [percobaan ${r.attempts}]` : "";
+      console.log(
+        `    ${when}  ${r.periodKey}  ${r.status}${r.reason ? ` (${r.reason})` : ""}${dur}${tries}`,
+      );
+      // Inilah yang dulu hilang: penyebab sebenarnya, bukan cuma kategorinya.
+      if (r.detail) console.log(`        ↳ ${r.detail}`);
     }
   }
 

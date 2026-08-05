@@ -34,6 +34,8 @@ export type Cadence = "daily" | "weekly" | "monthly";
 export type HeartbeatOutcome = {
   status: "sent" | "saved" | "skipped" | "failed";
   reason?: string;
+  /** Pesan asli di balik `reason` — dari penyedia LLM atau dari parser. */
+  detail?: string;
 };
 
 const OUTCOME_TO_STATUS: Record<HeartbeatOutcome["status"], HeartbeatStatus> = {
@@ -45,6 +47,29 @@ const OUTCOME_TO_STATUS: Record<HeartbeatOutcome["status"], HeartbeatStatus> = {
 
 /** Sesudah ini, sebuah klaim RUNNING dianggap milik proses yang sudah mati. */
 const STALE_CLAIM_MS = 15 * 60_000;
+
+/**
+ * Kegagalan yang penyebabnya bisa hilang sendiri tanpa deploy.
+ *
+ * Ketiganya adalah gangguan atau salah konfigurasi yang biasanya dibereskan
+ * dalam hitungan menit — provider pulih, admin menyimpan ulang API key,
+ * model diganti di panel. Sisanya (`not-premium`, `nothing-worth-sending`)
+ * adalah keputusan, bukan kegagalan, dan tidak boleh diulang.
+ */
+const RETRYABLE_REASONS = new Set(["no-api-key", "all-models-failed"]);
+
+/** Jeda sebelum periode yang gagal boleh diambil lagi. */
+const RETRY_AFTER_MS = 30 * 60_000;
+
+/**
+ * Batas percobaan per periode.
+ *
+ * Lima percobaan berjarak 30 menit menutup dua setengah jam pertama — cukup
+ * untuk hampir semua gangguan penyedia dan untuk admin yang membetulkan
+ * konfigurasi pagi itu. Lewat dari situ penyebabnya hampir pasti permanen, dan
+ * mengulang terus hanya membakar token tanpa mengubah hasil.
+ */
+const MAX_ATTEMPTS = 5;
 
 type LocalClock = { hour: number; isoDate: string; weekday: number; dayOfMonth: number };
 
@@ -188,8 +213,8 @@ export async function runHeartbeatForUser(params: {
   const analysis = await analyzeHeartbeat({ snapshot, config, userId, analyst: plan.analyst });
 
   if (!analysis.ok) {
-    node("llm.analyst", "error", analysis.reason, Date.now() - analystStartedAt);
-    return finish({ status: "skipped", reason: analysis.reason });
+    node("llm.analyst", "error", analysis.detail ?? analysis.reason, Date.now() - analystStartedAt);
+    return finish({ status: "skipped", reason: analysis.reason, detail: analysis.detail });
   }
   node(
     "llm.analyst",
@@ -200,10 +225,26 @@ export async function runHeartbeatForUser(params: {
 
   const wantsAttachment = cadence === "monthly" && plan.dispatch.monthlyAttachment;
   const attachment = wantsAttachment ? await buildMonthlyRecap(userId, periodKey) : undefined;
+
+  // Analis boleh menjawab "tidak ada yang layak mengganggu user" tanpa menulis
+  // satu kalimat pun. Diteruskan ke dispatch, itu akan menyimpan insight kosong
+  // di dashboard — jadi siklusnya berhenti di sini, dengan alasan yang jelas.
+  if (!analysis.analysis.shouldSend && !analysis.analysis.body && !attachment) {
+    node("dispatch.notify", "skipped", "tidak ada yang perlu dikirim");
+    return finish({ status: "skipped", reason: "nothing-worth-sending" });
+  }
+  // Rekap bulanan tetap harus berangkat meski analis tidak menulis apa-apa;
+  // caption lampirannya sudah berisi angka yang sama, jadi dipakai sebagai isi
+  // supaya insight yang tersimpan tidak kosong melompong.
+  const payload =
+    analysis.analysis.body || !attachment
+      ? analysis.analysis
+      : { ...analysis.analysis, title: "Rekap bulanan", body: attachment.caption };
+
   const result = await dispatchHeartbeat({
     userId,
     periodKey,
-    analysis: analysis.analysis,
+    analysis: payload,
     attachment,
     channels: { telegram: plan.dispatch.telegram, webPush: plan.dispatch.webPush },
   });
@@ -263,10 +304,65 @@ async function claimPeriod(params: {
     // P2002 = periode ini sudah tercatat, entah selesai sebelumnya atau sedang
     // dikerjakan proses worker lain saat ini juga.
     if (typeof err === "object" && err !== null && (err as { code?: string }).code === "P2002") {
-      return null;
+      return reclaimPeriod({ userId, periodKey, now });
     }
     throw err;
   }
+}
+
+/**
+ * Mengambil ulang periode yang berakhir gagal transien.
+ *
+ * Klaim ditulis sebelum pekerjaan supaya hasil apa pun meninggalkan jejak — tapi
+ * itu berarti gangguan penyedia sekali di jam kirim menghanguskan seluruh hari
+ * itu, karena unique index memblokir percobaan berikutnya sampai periode
+ * berganti. Persis yang terjadi di produksi: API key diperbaiki jam 6 lewat,
+ * siklus jam 7 gagal, dan tidak ada satu pun laporan sampai besok paginya.
+ */
+async function reclaimPeriod(params: {
+  userId: string;
+  periodKey: string;
+  now: Date;
+}): Promise<string | null> {
+  const { userId, periodKey, now } = params;
+
+  const existing = await prisma.heartbeatRun.findUnique({
+    where: { userId_periodKey: { userId, periodKey } },
+    select: { id: true, status: true, reason: true, attempts: true, finishedAt: true },
+  });
+  if (!existing) return null;
+
+  // RUNNING = proses lain sedang mengerjakannya (yang basi sudah dihapus di
+  // atas). SENT/SAVED = selesai. SKIPPED hanya boleh diulang kalau alasannya
+  // memang bisa hilang sendiri — keputusan analis tidak termasuk.
+  const retryable =
+    existing.status === "FAILED" ||
+    (existing.status === "SKIPPED" && RETRYABLE_REASONS.has(existing.reason ?? ""));
+  if (!retryable) return null;
+  if (existing.attempts >= MAX_ATTEMPTS) return null;
+  if (existing.finishedAt && now.getTime() - existing.finishedAt.getTime() < RETRY_AFTER_MS) {
+    return null;
+  }
+
+  // updateMany dengan status lama di filter: dua worker yang sampai di sini
+  // bersamaan hanya menyisakan satu pemenang, sisanya kena count 0.
+  const taken = await prisma.heartbeatRun.updateMany({
+    where: { id: existing.id, status: existing.status },
+    data: {
+      status: "RUNNING",
+      startedAt: now,
+      finishedAt: null,
+      durationMs: null,
+      attempts: { increment: 1 },
+    },
+  });
+  if (taken.count === 0) return null;
+
+  log.info(
+    { userId, periodKey, attempt: existing.attempts + 1, previous: existing.reason },
+    "Periode heartbeat dicoba ulang",
+  );
+  return existing.id;
 }
 
 async function finishRun(id: string, outcome: HeartbeatOutcome, startedAtMs: number) {
@@ -276,6 +372,7 @@ async function finishRun(id: string, outcome: HeartbeatOutcome, startedAtMs: num
       data: {
         status: OUTCOME_TO_STATUS[outcome.status],
         reason: outcome.reason ?? null,
+        detail: outcome.detail ?? null,
         finishedAt: new Date(),
         durationMs: Date.now() - startedAtMs,
       },
@@ -371,7 +468,13 @@ export async function tickHeartbeat(now = new Date()): Promise<number> {
       });
       await finishRun(claimId, outcome, startedAtMs);
       log.info(
-        { userId: setting.userId, periodKey, status: outcome.status, reason: outcome.reason },
+        {
+          userId: setting.userId,
+          periodKey,
+          status: outcome.status,
+          reason: outcome.reason,
+          detail: outcome.detail,
+        },
         "Siklus heartbeat selesai",
       );
       if (outcome.status !== "skipped") ran += 1;

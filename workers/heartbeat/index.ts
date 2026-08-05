@@ -71,12 +71,20 @@ async function runOnce() {
       cadence,
       status: outcome.status.toUpperCase() as "SENT" | "SAVED" | "SKIPPED" | "FAILED",
       reason: outcome.reason ?? null,
+      detail: outcome.detail ?? null,
       finishedAt: new Date(),
       durationMs: Date.now() - startedAtMs,
     },
   });
   log.info(
-    { userId, periodKey, cadence, status: outcome.status, reason: outcome.reason },
+    {
+      userId,
+      periodKey,
+      cadence,
+      status: outcome.status,
+      reason: outcome.reason,
+      detail: outcome.detail,
+    },
     "Heartbeat manual selesai",
   );
 }

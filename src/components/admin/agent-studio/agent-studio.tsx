@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Kanvas Agent Studio.
+ * Workspace Agent Studio.
  *
  * Satu keputusan yang membentuk seluruh file ini: React Flow yang memegang
  * keadaan node, bukan sebuah salinan graph di sebelahnya. Dua sumber posisi node
@@ -9,6 +9,13 @@
  * selisih itu berakhir di kolom yang dibaca runtime. Jadi `data` tiap node
  * membawa kind/config/enabled-nya sendiri, dan graph disusun ulang dari sana
  * setiap kali perlu dikirim ke server.
+ *
+ * Keputusan kedua menyangkut tata letak: halaman ini satu workspace setinggi
+ * viewport, bukan tumpukan panel yang digulir. Nilai halaman ini ada pada
+ * melihat node berkedip saat run masuk — dan itu mensyaratkan kanvas dan log
+ * terlihat bersamaan. Karena tinggi layar terbatas, palette, inspector, dan dok
+ * semuanya bisa dilipat: yang sedang tidak dipakai mengembalikan ruangnya ke
+ * kanvas alih-alih menyisakan kotak kosong.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -17,6 +24,7 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  MarkerType,
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
@@ -25,23 +33,26 @@ import {
   useNodesState,
   useReactFlow,
   type Connection,
+  type DefaultEdgeOptions,
   type Edge,
   type EdgeChange,
   type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Blocks, Loader2, Send, Workflow } from "lucide-react";
+import { Blocks, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Sliders, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Panel, PanelHeader, Tone, inkButtonGhost, inkInput } from "@/components/admin/ui";
+import { Panel } from "@/components/admin/ui";
+import { Dock, type DockTab } from "./dock";
 import { NodeCard, type StudioNode, type StudioNodeData } from "./node-card";
 import { NodeInspector } from "./node-inspector";
 import { Palette } from "./palette";
-import { RunConsole } from "./run-console";
 import { Toolbar, type SaveState } from "./toolbar";
 import { useAgentStream } from "./use-agent-stream";
 import {
   ACCENTS,
+  EDGE_COLOR,
   sameGraph,
+  type AccentName,
   type AgentEdge,
   type AgentGraphData,
   type AgentNode,
@@ -57,6 +68,22 @@ const NODE_TYPES = { studio: NodeCard };
 
 /** Jeda sebelum draft disimpan sendiri. Cukup lama agar menggeser node tidak jadi satu request per pixel. */
 const AUTOSAVE_MS = 1_500;
+
+/**
+ * Garis siku, bukan bezier, dan tanpa animasi.
+ *
+ * Graph ini disusun dalam baris dan kolom, dan lengkung bezier melintasinya
+ * dengan sudut yang tidak pernah sejajar apa pun — pada dua belas node hasilnya
+ * terbaca sebagai kusut. Animasi dimatikan karena arah aliran sudah dinyatakan
+ * panah, dan garis putus-putus yang bergerak terus-menerus bersaing dengan satu
+ * hal yang memang harus menarik mata di sini: node yang sedang berjalan.
+ */
+const EDGE_OPTIONS: DefaultEdgeOptions = {
+  type: "smoothstep",
+  animated: false,
+  style: { stroke: EDGE_COLOR, strokeWidth: 1.8 },
+  markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: EDGE_COLOR },
+};
 
 export function AgentStudio(props: {
   payload: StudioPayload;
@@ -104,7 +131,11 @@ function Studio({
   const [publishedAt, setPublishedAt] = useState(payload.publishedAt);
   const [revisions, setRevisions] = useState(payload.revisions);
   const [published, setPublished] = useState(payload.published);
-  const [testOpen, setTestOpen] = useState(false);
+
+  const [paletteOpen, setPaletteOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [dockOpen, setDockOpen] = useState(false);
+  const [dockTab, setDockTab] = useState<DockTab>("runs");
 
   const { events, nodeStates, status } = useAgentStream(initialEvents);
 
@@ -131,6 +162,20 @@ function Studio({
 
   const selected = nodes.find((node) => node.id === selectedId) ?? null;
   const selectedDefinition = selected ? definitions.get(selected.data.kind) ?? null : null;
+
+  /**
+   * Memilih node berarti ingin mengaturnya, jadi panelnya ikut terbuka.
+   *
+   * Dipasang di sini, bukan di effect yang mengawasi `selectedId`: membuka
+   * inspector adalah reaksi terhadap satu tindakan admin, bukan penyelarasan
+   * dengan keadaan di luar React. Sebagai effect, ia juga akan menyalak kembali
+   * pada seleksi yang datang dari mana pun — termasuk saat panel baru saja
+   * ditutup manual.
+   */
+  const selectNode = useCallback((id: string) => {
+    setSelectedId(id);
+    setInspectorOpen(true);
+  }, []);
 
   /* ── Mutasi kanvas ───────────────────────────────────────────────────────── */
 
@@ -179,9 +224,9 @@ function Studio({
       const id = `${kind.replace(".", "-")}-${Math.random().toString(36).slice(2, 7)}`;
       const at = position ?? { x: 80 + nodes.length * 24, y: 80 + nodes.length * 18 };
       setNodes((current) => [...current, toFlowNode(newAgentNode(id, definition, at), definition)]);
-      setSelectedId(id);
+      selectNode(id);
     },
-    [definitions, markTouched, nodes, setNodes],
+    [definitions, markTouched, nodes, selectNode, setNodes],
   );
 
   const updateSelected = useCallback(
@@ -264,7 +309,7 @@ function Studio({
   );
 
   // Autosave: draft memang tidak dibaca runtime, jadi menyimpannya sering tidak
-  // punya risiko — dan itu yang membuat daftar masalah di toolbar tetap segar.
+  // punya risiko — dan itu yang membuat daftar masalah di topbar tetap segar.
   useEffect(() => {
     if (!touched.current || !dirty || state.kind === "busy") return;
     const timer = setTimeout(() => void saveDraft(true), AUTOSAVE_MS);
@@ -306,8 +351,13 @@ function Studio({
     [issues, selectedId],
   );
 
+  const openTest = useCallback(() => {
+    setDockTab("test");
+    setDockOpen((prev) => (prev && dockTab === "test" ? false : true));
+  }, [dockTab]);
+
   return (
-    <div className="space-y-4">
+    <div className="flex h-[calc(100svh-7rem)] min-h-[36rem] flex-col gap-3 sm:h-[calc(100svh-8rem)]">
       <Toolbar
         version={version}
         publishedAt={publishedAt}
@@ -323,44 +373,28 @@ function Studio({
           markTouched();
           loadGraph(payload.defaultGraph);
         }}
-        onToggleTest={() => setTestOpen((prev) => !prev)}
-        testOpen={testOpen}
+        onOpenTest={openTest}
+        testOpen={dockOpen && dockTab === "test"}
       />
 
-      {testOpen && <TestPanel graph={graph} />}
+      {/*
+        Di bawah `lg`, palette dan inspector melayang di atas kanvas alih-alih
+        ikut membagi lebar: pada layar sempit tiga kolom berarti kanvas tinggal
+        selebar satu kartu node, yang membuat halamannya tidak bisa dipakai sama
+        sekali. Markup-nya sama, hanya posisinya yang berganti.
+      */}
+      <div className="relative flex min-h-0 flex-1 gap-3">
+        {paletteOpen && (
+          <SidePanel side="left" title="Node" icon={Blocks} onClose={() => setPaletteOpen(false)}>
+            <div className="px-2.5 py-3">
+              <Palette catalogue={payload.catalogue} used={usedKinds} onAdd={(kind) => addNode(kind)} />
+            </div>
+          </SidePanel>
+        )}
 
-      <div className="grid gap-4 xl:grid-cols-[15rem_minmax(0,1fr)_20rem]">
-        <Panel className="order-2 xl:order-1">
-          <PanelHeader title="Node" hint="Tarik ke kanvas atau klik" icon={Blocks} />
-          <div className="max-h-[28rem] overflow-y-auto px-2.5 py-3 xl:max-h-[36rem]">
-            <Palette catalogue={payload.catalogue} used={usedKinds} onAdd={(kind) => addNode(kind)} />
-          </div>
-        </Panel>
-
-        <Panel className="order-1 overflow-hidden xl:order-2">
-          <PanelHeader
-            title="Kanvas pipeline"
-            hint="Jalur atas melayani chat, jalur bawah laporan proaktif"
-            icon={Workflow}
-            actions={
-              <span className="hidden gap-1.5 sm:flex">
-                {(Object.keys(ACCENTS) as Array<keyof typeof ACCENTS>).map((key) => (
-                  <span
-                    key={key}
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold",
-                      ACCENTS[key].bg,
-                      ACCENTS[key].text,
-                    )}
-                  >
-                    {ACCENTS[key].label}
-                  </span>
-                ))}
-              </span>
-            }
-          />
+        <Panel className="relative min-w-0 flex-1 overflow-hidden bg-ink/40">
           <div
-            className="h-[32rem] w-full xl:h-[40rem]"
+            className="size-full"
             onDragOver={(event) => {
               event.preventDefault();
               event.dataTransfer.dropEffect = "move";
@@ -379,14 +413,18 @@ function Studio({
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
-              onNodeClick={(_, node) => setSelectedId(node.id)}
+              onNodeClick={(_, node) => selectNode(node.id)}
               onPaneClick={() => setSelectedId(null)}
               fitView
+              fitViewOptions={{ padding: 0.22, maxZoom: 1 }}
+              minZoom={0.3}
+              maxZoom={1.6}
+              // Node ditempelkan ke kisi yang sama dengan dot grid di latar,
+              // supaya susunan hasil geser manual tetap sejajar tanpa dirapikan.
+              snapToGrid
+              snapGrid={[20, 20]}
               proOptions={{ hideAttribution: false }}
-              defaultEdgeOptions={{
-                animated: true,
-                style: { stroke: "var(--ink-border)", strokeWidth: 1.6 },
-              }}
+              defaultEdgeOptions={EDGE_OPTIONS}
               className="[&_.react-flow\_\_attribution]:!bg-transparent [&_.react-flow\_\_attribution]:!text-[10px]"
               style={{ background: "transparent" }}
             >
@@ -405,15 +443,75 @@ function Studio({
                 zoomable
                 className="!border !border-ink-border !bg-ink-soft"
                 maskColor="oklch(0.16 0.03 190 / 0.7)"
-                nodeColor={() => "var(--ink-border)"}
+                nodeColor={(node) => ACCENTS[(node.data as StudioNodeData).accent].swatch}
+                nodeStrokeWidth={0}
               />
             </ReactFlow>
           </div>
+
+          {/* Chrome kanvas: melayang di atas React Flow, tidak mengambil tingginya. */}
+          <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2">
+            <CanvasButton
+              onClick={() => setPaletteOpen((prev) => !prev)}
+              label={paletteOpen ? "Sembunyikan daftar node" : "Tampilkan daftar node"}
+            >
+              {paletteOpen ? (
+                <PanelLeftClose aria-hidden className="size-4" strokeWidth={2.2} />
+              ) : (
+                <PanelLeftOpen aria-hidden className="size-4" strokeWidth={2.2} />
+              )}
+            </CanvasButton>
+
+            <div className="pointer-events-auto hidden items-center gap-2.5 rounded-xl border border-ink-border bg-ink-soft/90 px-2.5 py-1.5 backdrop-blur-sm md:flex">
+              {(Object.keys(ACCENTS) as AccentName[]).map((key) => (
+                <span key={key} className="flex items-center gap-1 text-[10px] font-bold text-ink-muted">
+                  <span
+                    aria-hidden
+                    className="size-1.5 rounded-full"
+                    style={{ background: ACCENTS[key].swatch }}
+                  />
+                  {ACCENTS[key].label}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="absolute right-3 top-3 z-10">
+            <CanvasButton
+              onClick={() => setInspectorOpen((prev) => !prev)}
+              label={inspectorOpen ? "Sembunyikan pengaturan node" : "Tampilkan pengaturan node"}
+            >
+              {inspectorOpen ? (
+                <PanelRightClose aria-hidden className="size-4" strokeWidth={2.2} />
+              ) : (
+                <PanelRightOpen aria-hidden className="size-4" strokeWidth={2.2} />
+              )}
+            </CanvasButton>
+          </div>
+
+          {nodes.length === 0 && (
+            <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-6">
+              <div className="max-w-sm text-center">
+                <span className="mx-auto grid size-11 place-items-center rounded-2xl bg-ink text-ink-muted">
+                  <Blocks aria-hidden className="size-5" strokeWidth={1.8} />
+                </span>
+                <p className="mt-4 text-sm font-semibold text-ink-foreground">Kanvas masih kosong</p>
+                <p className="mt-1.5 text-sm text-ink-muted">
+                  Tarik node dari daftar di kiri, atau muat susunan bawaan lewat menu di kanan atas
+                  topbar.
+                </p>
+              </div>
+            </div>
+          )}
         </Panel>
 
-        <Panel className="order-3">
-          <PanelHeader title="Pengaturan node" hint={selected ? selected.data.label : "Belum ada yang dipilih"} />
-          <div className="max-h-[28rem] overflow-y-auto xl:max-h-[36rem]">
+        {inspectorOpen && (
+          <SidePanel
+            side="right"
+            title="Pengaturan node"
+            icon={Sliders}
+            onClose={() => setInspectorOpen(false)}
+          >
             <NodeInspector
               node={
                 selected
@@ -441,120 +539,95 @@ function Studio({
               }
               onDelete={deleteSelected}
             />
-          </div>
-        </Panel>
+          </SidePanel>
+        )}
       </div>
 
-      <Panel className="overflow-hidden">
-        <div className="h-[22rem]">
-          <RunConsole
-            events={events}
-            heartbeatRuns={heartbeatRuns}
-            status={status}
-            nodeLabels={nodeLabels}
-          />
-        </div>
-      </Panel>
+      <Dock
+        open={dockOpen}
+        tab={dockTab}
+        onTabChange={(next) => {
+          setDockTab(next);
+          setDockOpen(true);
+        }}
+        onToggle={() => setDockOpen((prev) => !prev)}
+        events={events}
+        heartbeatRuns={heartbeatRuns}
+        status={status}
+        nodeLabels={nodeLabels}
+        graph={graph}
+      />
     </div>
   );
 }
 
-/* ── Uji coba ──────────────────────────────────────────────────────────────── */
-
-type TestResult = {
-  text: string;
-  toolsUsed: string[];
-  ms: number;
-  blockedTools: string[];
-};
-
-function TestPanel({ graph }: { graph: AgentGraphData }) {
-  const [message, setMessage] = useState("berapa saldo saya sekarang?");
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<TestResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const run = async () => {
-    setBusy(true);
-    setError(null);
-    setResult(null);
-    try {
-      const res = await fetch("/api/admin/agent-graph/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, graph }),
-      });
-      const json = await res.json();
-      if (!json.ok) setError(json.error ?? "Uji coba gagal.");
-      else setResult(json.data as TestResult);
-    } catch {
-      setError("Tidak bisa menghubungi server.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
+function SidePanel({
+  side,
+  title,
+  hint,
+  icon: Icon,
+  onClose,
+  children,
+}: {
+  side: "left" | "right";
+  title: string;
+  hint?: string;
+  icon: typeof Blocks;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
   return (
-    <Panel>
-      <PanelHeader
-        title="Jalankan tes"
-        hint="Dijalankan atas nama akun admin ini, dengan seluruh tool yang bisa mengubah data dicabut dari rencana"
-      />
-      <div className="space-y-3 px-4 py-3.5">
-        <div className="flex flex-wrap gap-2">
-          <label className="min-w-0 flex-1">
-            <span className="sr-only">Pesan contoh</span>
-            <input
-              type="text"
-              value={message}
-              maxLength={500}
-              onChange={(event) => setMessage(event.target.value)}
-              onKeyDown={(event) => event.key === "Enter" && !busy && message.trim() && void run()}
-              placeholder="Tulis pesan contoh…"
-              className={cn(inkInput, "h-10")}
-            />
-          </label>
-          <button
-            type="button"
-            onClick={() => void run()}
-            disabled={busy || !message.trim()}
-            className={cn(inkButtonGhost, "h-10 px-4 text-xs")}
-          >
-            {busy ? (
-              <Loader2 aria-hidden className="size-3.5 animate-spin" strokeWidth={2.4} />
-            ) : (
-              <Send aria-hidden className="size-3.5" strokeWidth={2.4} />
-            )}
-            Kirim
-          </button>
-        </div>
+    <Panel
+      className={cn(
+        "absolute inset-y-0 z-20 flex flex-col overflow-hidden shadow-2xl shadow-black/40",
+        "lg:relative lg:inset-y-auto lg:z-auto lg:shrink-0 lg:shadow-none",
+        side === "left" ? "left-0 w-60" : "right-0 w-[19rem] lg:w-80",
+      )}
+    >
+      <header className="flex shrink-0 items-center gap-2 border-b border-ink-border/70 px-3 py-2.5">
+        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-ink text-brand-glow">
+          <Icon aria-hidden className="size-3.5" strokeWidth={2.2} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-bold text-ink-foreground">{title}</span>
+          {hint && <span className="block truncate text-[10px] text-ink-muted">{hint}</span>}
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={`Tutup panel ${title}`}
+          className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-lg text-ink-muted outline-none transition-colors hover:bg-ink hover:text-ink-foreground focus-visible:ring-3 focus-visible:ring-brand-glow/40"
+        >
+          <X aria-hidden className="size-3.5" strokeWidth={2.4} />
+        </button>
+      </header>
 
-        {error && (
-          <p role="alert" className="rounded-xl border border-rose-400/30 bg-rose-500/8 px-3 py-2 text-xs text-rose-200">
-            {error}
-          </p>
-        )}
-
-        {result && (
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Tone tone="positive">{result.ms} ms</Tone>
-              {result.toolsUsed.length > 0 && (
-                <Tone tone="info">tool dipakai: {result.toolsUsed.join(", ")}</Tone>
-              )}
-              {result.blockedTools.length > 0 && (
-                <Tone tone="warning">
-                  {result.blockedTools.length} tool penulis dicabut demi keamanan uji coba
-                </Tone>
-              )}
-            </div>
-            <p className="whitespace-pre-wrap rounded-xl border border-ink-border/70 bg-ink/40 px-3 py-2.5 text-xs leading-relaxed text-ink-foreground">
-              {result.text}
-            </p>
-          </div>
-        )}
-      </div>
+      {/* Tanpa padding: isi panel ini punya rapatnya sendiri — inspector memberi
+          jarak per grup field, palette per kelompok jalur. */}
+      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
     </Panel>
+  );
+}
+
+function CanvasButton({
+  onClick,
+  label,
+  children,
+}: {
+  onClick: () => void;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="pointer-events-auto grid size-8 cursor-pointer place-items-center rounded-xl border border-ink-border bg-ink-soft/90 text-ink-muted outline-none backdrop-blur-sm transition-colors hover:text-ink-foreground focus-visible:ring-3 focus-visible:ring-brand-glow/40"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -577,6 +650,10 @@ function toFlowNode(node: AgentNode, definition: NodeDefinition): StudioNode {
     id: node.id,
     type: "studio",
     position: node.position,
+    // Node wajib dikunci dari tombol Delete. Inspector sudah menolak menghapusnya,
+    // tapi pintasan keyboard React Flow tidak lewat sana — tanpa ini, satu tekan
+    // Delete bisa mencabut `llm.reasoner` dan membuat graph gagal publish.
+    deletable: !definition.required,
     data: {
       kind: node.kind,
       rawLabel: node.label ?? "",

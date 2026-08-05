@@ -1,22 +1,23 @@
 "use client";
 
 /**
- * Konsol eksekusi: apa yang benar-benar dijalankan runtime, bukan apa yang
+ * Isi konsol eksekusi: apa yang benar-benar dijalankan runtime, bukan apa yang
  * digambar di kanvas.
  *
- * Dua tab dengan umur berbeda: event per-node hidup di ring buffer Redis dan
+ * Dua daftar dengan umur berbeda: event per-node hidup di ring buffer Redis dan
  * hanya menyimpan puluhan terakhir, sedangkan siklus heartbeat dibaca dari tabel
  * karena di situlah bukti bahwa fitur proaktif benar-benar jalan tiap hari.
+ *
+ * File ini sengaja hanya memegang daftarnya. Tab, indikator live, dan lipatan
+ * dok ada di `dock.tsx` — memisahkannya membuat dok bisa menampung tab ketiga
+ * (uji coba) tanpa daftar-daftar ini ikut tahu soal itu.
  */
 
 import { useMemo, useState } from "react";
-import { CircleSlash, ListTree, Radio, Timer } from "lucide-react";
+import { CircleSlash, Radio } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { EmptyState, LiveDot, Tone, relativeTime } from "@/components/admin/ui";
+import { EmptyState, Tone, relativeTime } from "@/components/admin/ui";
 import { RUN_TONES, formatMs, type AgentTelemetryEvent, type HeartbeatRunRow } from "./shared";
-import type { StreamStatus } from "./use-agent-stream";
-
-type Tab = "runs" | "heartbeat";
 
 const HEARTBEAT_TONE: Record<string, "positive" | "neutral" | "warning" | "danger"> = {
   sent: "positive",
@@ -31,121 +32,80 @@ const CADENCE_LABEL: Record<string, string> = {
   monthly: "Bulanan",
 };
 
-export function RunConsole({
-  events,
-  heartbeatRuns,
-  status,
+export function RunList({
+  runs,
   nodeLabels,
 }: {
-  events: AgentTelemetryEvent[];
-  heartbeatRuns: HeartbeatRunRow[];
-  status: StreamStatus;
+  runs: GroupedRun[];
   /** id node → nama yang tampil di kanvas, supaya log memakai istilah yang sama. */
   nodeLabels: Record<string, string>;
 }) {
-  const [tab, setTab] = useState<Tab>("runs");
-
-  const runs = useMemo(() => groupRuns(events), [events]);
+  if (runs.length === 0) {
+    return (
+      <EmptyState
+        icon={Radio}
+        title="Belum ada eksekusi tercatat"
+        description="Kirim satu pesan dari chat, atau tekan Jalankan tes — node di kanvas akan berkedip berurutan di sini."
+      />
+    );
+  }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-ink-border/70 px-4 py-2.5">
-        <div role="tablist" aria-label="Tampilan konsol" className="flex gap-1">
-          <TabButton active={tab === "runs"} onClick={() => setTab("runs")} icon={ListTree}>
-            Eksekusi
-            <span className="tabular-money ml-1 text-ink-muted">({runs.length})</span>
-          </TabButton>
-          <TabButton active={tab === "heartbeat"} onClick={() => setTab("heartbeat")} icon={Timer}>
-            Siklus proaktif
-            <span className="tabular-money ml-1 text-ink-muted">({heartbeatRuns.length})</span>
-          </TabButton>
-        </div>
-
-        <span className="flex items-center gap-1.5 text-[11px] font-semibold text-ink-muted">
-          <LiveDot live={status === "live"} />
-          {status === "live"
-            ? "Terhubung realtime"
-            : status === "denied"
-              ? "Socket menolak sesi"
-              : status === "polling"
-                ? "Mode polling"
-                : "Menyambung…"}
-        </span>
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {tab === "runs" ? (
-          runs.length === 0 ? (
-            <EmptyState
-              icon={Radio}
-              title="Belum ada eksekusi tercatat"
-              description="Kirim satu pesan dari chat, atau tekan Jalankan tes — node di kanvas akan berkedip berurutan di sini."
-            />
-          ) : (
-            <ul className="divide-y divide-ink-border/50">
-              {runs.map((run) => (
-                <RunRow key={run.runId} run={run} nodeLabels={nodeLabels} />
-              ))}
-            </ul>
-          )
-        ) : heartbeatRuns.length === 0 ? (
-          <EmptyState
-            icon={CircleSlash}
-            title="Belum ada siklus proaktif"
-            description="Baris muncul begitu worker heartbeat melewati jam kirim user pertama."
-          />
-        ) : (
-          <ul className="divide-y divide-ink-border/50">
-            {heartbeatRuns.map((run) => (
-              <li key={run.id} className="flex flex-wrap items-center gap-2.5 px-4 py-2.5 text-xs">
-                <Tone tone={HEARTBEAT_TONE[run.status] ?? "neutral"}>{run.status}</Tone>
-                <span className="font-semibold text-ink-foreground">
-                  {CADENCE_LABEL[run.cadence] ?? run.cadence}
-                </span>
-                {run.reason && <span className="text-ink-muted">· {run.reason}</span>}
-                <span className="tabular-money ml-auto text-ink-muted">
-                  {formatMs(run.durationMs ?? undefined)}
-                </span>
-                <span className="text-ink-muted">{relativeTime(run.startedAt)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
+    <ul className="divide-y divide-ink-border/50">
+      {runs.map((run) => (
+        <RunRow key={run.runId} run={run} nodeLabels={nodeLabels} />
+      ))}
+    </ul>
   );
 }
 
-function TabButton({
-  active,
-  onClick,
-  icon: Icon,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: typeof ListTree;
-  children: React.ReactNode;
-}) {
+export function HeartbeatList({ rows }: { rows: HeartbeatRunRow[] }) {
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={CircleSlash}
+        title="Belum ada siklus proaktif"
+        description="Baris muncul begitu worker heartbeat melewati jam kirim user pertama."
+      />
+    );
+  }
+
   return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={cn(
-        "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-bold outline-none transition-colors",
-        "focus-visible:ring-3 focus-visible:ring-brand-glow/40",
-        active ? "bg-ink text-ink-foreground" : "text-ink-muted hover:text-ink-foreground",
-      )}
-    >
-      <Icon aria-hidden className="size-3.5" strokeWidth={2.4} />
-      {children}
-    </button>
+    <ul className="divide-y divide-ink-border/50">
+      {rows.map((run) => (
+        <li key={run.id} className="px-4 py-2.5 text-xs">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Tone tone={HEARTBEAT_TONE[run.status] ?? "neutral"}>{run.status}</Tone>
+            <span className="font-semibold text-ink-foreground">
+              {CADENCE_LABEL[run.cadence] ?? run.cadence}
+            </span>
+            {run.reason && <span className="text-ink-muted">· {run.reason}</span>}
+            {run.attempts > 1 && (
+              <span className="tabular-money text-ink-muted">· percobaan ke-{run.attempts}</span>
+            )}
+            <span className="tabular-money ml-auto text-ink-muted">
+              {formatMs(run.durationMs ?? undefined)}
+            </span>
+            <span className="text-ink-muted">{relativeTime(run.startedAt)}</span>
+          </div>
+
+          {/* Pesan asli penyedia. Tanpa baris ini, satu-satunya salinannya ada di
+              stdout container — yang di VPS berarti tidak terbaca siapa pun. */}
+          {run.detail && (
+            <p
+              title={run.detail}
+              className="mt-1 line-clamp-2 text-[11px] leading-snug text-ink-muted"
+            >
+              {run.detail}
+            </p>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 
-type GroupedRun = {
+export type GroupedRun = {
   runId: string;
   track: string;
   channel: string;
@@ -157,7 +117,7 @@ type GroupedRun = {
 };
 
 /** Event datang terbaru-dulu dan bisa tercecer; pengelompokan menyusunnya ulang. */
-function groupRuns(events: AgentTelemetryEvent[]): GroupedRun[] {
+export function groupRuns(events: AgentTelemetryEvent[]): GroupedRun[] {
   const map = new Map<string, GroupedRun>();
   const order: string[] = [];
 
@@ -197,6 +157,10 @@ function groupRuns(events: AgentTelemetryEvent[]): GroupedRun[] {
 function RunRow({ run, nodeLabels }: { run: GroupedRun; nodeLabels: Record<string, string> }) {
   const [open, setOpen] = useState(false);
 
+  // Rangkuman status per node dipakai sebagai jejak mini di baris yang tertutup:
+  // bentuk sebuah run sering sudah cukup untuk tahu run mana yang perlu dibuka.
+  const trail = useMemo(() => run.nodes.slice(0, 12), [run.nodes]);
+
   return (
     <li>
       <button
@@ -212,7 +176,17 @@ function RunRow({ run, nodeLabels }: { run: GroupedRun; nodeLabels: Record<strin
           {run.track === "heartbeat" ? "Laporan proaktif" : "Chat"}
         </span>
         {run.channel && <span className="text-ink-muted">· {run.channel}</span>}
-        <span className="tabular-money text-ink-muted">· {run.nodes.length} node</span>
+
+        <span aria-hidden className="flex items-center gap-1">
+          {trail.map((node, index) => (
+            <span
+              key={`${node.nodeId}-${index}`}
+              className={cn("size-1.5 rounded-full", RUN_TONES[node.status].dot)}
+            />
+          ))}
+        </span>
+        <span className="tabular-money text-ink-muted">{run.nodes.length} node</span>
+
         {run.toolsUsed && run.toolsUsed.length > 0 && (
           <span className="tabular-money text-ink-muted">· {run.toolsUsed.length} tool</span>
         )}

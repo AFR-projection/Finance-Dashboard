@@ -67,15 +67,25 @@ export function iconFor(name: string): LucideIcon {
  * dan label kategorinya, supaya kanvas tetap terbaca tanpa persepsi warna.
  */
 export const ACCENTS = {
-  trigger: { text: "text-sky-300", bg: "bg-sky-400/12", border: "border-sky-400/35", label: "Pemicu" },
-  context: { text: "text-violet-300", bg: "bg-violet-400/12", border: "border-violet-400/35", label: "Konteks" },
-  reason: { text: "text-brand-glow", bg: "bg-brand-glow/12", border: "border-brand-glow/35", label: "Penalaran" },
-  act: { text: "text-amber-300", bg: "bg-amber-400/12", border: "border-amber-400/35", label: "Aksi" },
-  guard: { text: "text-rose-300", bg: "bg-rose-400/12", border: "border-rose-400/35", label: "Penjaga" },
-  output: { text: "text-emerald-300", bg: "bg-emerald-400/12", border: "border-emerald-400/35", label: "Keluaran" },
+  trigger: { text: "text-sky-300", bg: "bg-sky-400/12", border: "border-sky-400/35", label: "Pemicu", swatch: "oklch(0.79 0.12 235)" },
+  context: { text: "text-violet-300", bg: "bg-violet-400/12", border: "border-violet-400/35", label: "Konteks", swatch: "oklch(0.78 0.13 295)" },
+  reason: { text: "text-brand-glow", bg: "bg-brand-glow/12", border: "border-brand-glow/35", label: "Penalaran", swatch: "oklch(0.78 0.12 175)" },
+  act: { text: "text-amber-300", bg: "bg-amber-400/12", border: "border-amber-400/35", label: "Aksi", swatch: "oklch(0.85 0.13 85)" },
+  guard: { text: "text-rose-300", bg: "bg-rose-400/12", border: "border-rose-400/35", label: "Penjaga", swatch: "oklch(0.78 0.13 15)" },
+  output: { text: "text-emerald-300", bg: "bg-emerald-400/12", border: "border-emerald-400/35", label: "Keluaran", swatch: "oklch(0.83 0.13 155)" },
 } as const;
 
 export type AccentName = keyof typeof ACCENTS;
+
+/**
+ * Warna garis dan panah antar node.
+ *
+ * Ditulis literal, bukan `var(--ink-border)`: marker SVG diwarnai lewat atribut
+ * `fill` yang tidak ikut mewarisi custom property dari elemen pemanggilnya, jadi
+ * token di situ akan diam-diam jatuh ke hitam. Nilainya sengaja satu tingkat
+ * lebih terang dari border panel supaya arah aliran tetap terbaca di atas dot grid.
+ */
+export const EDGE_COLOR = "oklch(0.44 0.03 185)";
 
 export type NodeRunState = {
   status: "running" | "ok" | "skipped" | "error";
@@ -102,6 +112,9 @@ export type HeartbeatRunRow = {
   cadence: string;
   status: string;
   reason: string | null;
+  /** Pesan asli di balik `reason`, mis. balasan mentah model yang gagal diparse. */
+  detail: string | null;
+  attempts: number;
   startedAt: string;
   durationMs: number | null;
 };

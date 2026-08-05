@@ -13,7 +13,6 @@ import { validateGraph } from "@/ai/graph/compile";
 import { DEFAULT_GRAPH } from "@/ai/graph/default-graph";
 import { readGraphRecord } from "@/ai/graph/store";
 import { AgentStudio } from "@/components/admin/agent-studio/agent-studio";
-import { PageHeader } from "@/components/admin/ui";
 import { readRecentAgentEvents } from "@/lib/agent-telemetry";
 import { prisma } from "@/lib/db";
 
@@ -36,41 +35,39 @@ export default async function AdminAgentPage() {
         cadence: true,
         status: true,
         reason: true,
+        detail: true,
+        attempts: true,
         startedAt: true,
         durationMs: true,
       },
     }),
   ]);
 
+  // Tanpa `PageHeader`: halaman ini satu workspace setinggi viewport, dan judul
+  // beserta status graph-nya sudah dibawa topbar Agent Studio. Menambah header
+  // halaman di atasnya berarti dua judul dan 6rem tinggi yang diambil dari
+  // kanvas — satu-satunya elemen di sini yang benar-benar butuh ruang.
   return (
-    <div className="space-y-6">
-      <PageHeader
-        eyebrow="Platform"
-        title="Agent Studio"
-        description="Susunan node di sini benar-benar menggerakkan agent. Draft bebas diubah kapan saja; hanya Publish yang menyentuh runtime yang sedang melayani user."
-      />
-
-      <AgentStudio
-        payload={{
-          version: record.version,
-          published: record.published,
-          draft: record.draft,
-          publishedAt: record.publishedAt?.toISOString() ?? null,
-          updatedBy: record.updatedBy,
-          revisions: revisions.map((revision) => ({
-            ...revision,
-            createdAt: revision.createdAt.toISOString(),
-          })),
-          catalogue: NODE_DEFINITION_LIST,
-          defaultGraph: DEFAULT_GRAPH,
-          issues: validateGraph(record.draft ?? record.published),
-        }}
-        initialEvents={events}
-        heartbeatRuns={heartbeatRuns.map((run) => ({
-          ...run,
-          startedAt: run.startedAt.toISOString(),
-        }))}
-      />
-    </div>
+    <AgentStudio
+      payload={{
+        version: record.version,
+        published: record.published,
+        draft: record.draft,
+        publishedAt: record.publishedAt?.toISOString() ?? null,
+        updatedBy: record.updatedBy,
+        revisions: revisions.map((revision) => ({
+          ...revision,
+          createdAt: revision.createdAt.toISOString(),
+        })),
+        catalogue: NODE_DEFINITION_LIST,
+        defaultGraph: DEFAULT_GRAPH,
+        issues: validateGraph(record.draft ?? record.published),
+      }}
+      initialEvents={events}
+      heartbeatRuns={heartbeatRuns.map((run) => ({
+        ...run,
+        startedAt: run.startedAt.toISOString(),
+      }))}
+    />
   );
 }
