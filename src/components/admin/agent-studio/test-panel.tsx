@@ -3,10 +3,9 @@
 /**
  * Uji coba draft terhadap satu pesan contoh.
  *
- * Dirender tanpa chrome panel karena tempatnya di dalam dok bawah, sebagai tab
- * di sebelah log eksekusi. Versi sebelumnya menyisipkannya sebagai panel penuh
- * di atas kanvas, yang berarti menekan "Jalankan tes" mendorong seluruh kanvas
- * turun — tepat pada saat admin ingin melihat node-nya berkedip.
+ * Dirender tanpa chrome panel: pembungkusnya milik halaman, dan halaman itu yang
+ * tahu graph mana yang sedang diuji — draft atau yang dipublish. Komponen ini
+ * hanya bertugas mengirim satu pesan dan menggambar hasilnya.
  */
 
 import { useState } from "react";

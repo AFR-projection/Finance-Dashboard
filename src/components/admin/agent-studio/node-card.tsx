@@ -3,15 +3,24 @@
 /**
  * Kartu satu node di kanvas.
  *
- * Kartu ini menampilkan tiga hal sekaligus tanpa saling menutupi: apa node-nya
- * (ikon + kategori), apakah dia aktif, dan apa yang sedang terjadi padanya di
- * run terakhir. Status run muncul sebagai cincin + titik + teks — bukan warna
- * saja — supaya tetap terbaca tanpa persepsi warna.
+ * Kartu ini menampilkan empat hal tanpa saling menutupi: apa node-nya (ikon +
+ * kategori), apakah dia aktif, apa yang sedang terjadi padanya di run terakhir,
+ * dan — kalau mode kesehatan menyala — bagaimana perilakunya di seluruh run yang
+ * masih ada di buffer.
+ *
+ * Baris kesehatan itu yang mengubah diagram jadi alat: susunan node bisa dibaca
+ * dari kode, tapi node mana yang memakan separuh waktu tiap run hanya kelihatan
+ * kalau angkanya ditempel di tempat node itu berdiri. Lebar batangnya relatif
+ * terhadap node terlambat di graph, jadi yang dicari mata adalah batang
+ * terpanjang, bukan angka terbesar.
+ *
+ * Status run muncul sebagai cincin + titik + teks — bukan warna saja — supaya
+ * tetap terbaca tanpa persepsi warna.
  */
 
 import { memo } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import { EyeOff } from "lucide-react";
+import { EyeOff, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NodeIcon } from "./node-icon";
 import {
@@ -22,6 +31,7 @@ import {
   type AgentNodeKind,
   type NodeRunState,
 } from "./shared";
+import type { NodeHealth } from "./use-agent-stream";
 
 /**
  * Node React Flow membawa seluruh keadaan node-nya, bukan cuma tampilannya.
@@ -46,6 +56,11 @@ export type StudioNodeData = {
   required: boolean;
   invalid: boolean;
   run?: NodeRunState;
+
+  /** Agregat lintas-run dari buffer telemetri. Hanya terisi saat mode kesehatan aktif. */
+  health?: NodeHealth;
+  /** Rata-rata node paling lambat di graph — penyebut lebar batang. */
+  healthPeak?: number;
 };
 
 export type StudioNode = Node<StudioNodeData, "studio">;
@@ -57,6 +72,7 @@ function NodeCardImpl({ data, selected }: NodeProps<StudioNode>) {
   const accent = ACCENTS[data.accent];
   const run = data.run;
   const tone = run ? RUN_TONES[run.status] : null;
+  const health = data.health;
 
   return (
     <div
@@ -66,6 +82,8 @@ function NodeCardImpl({ data, selected }: NodeProps<StudioNode>) {
         data.invalid ? "border-rose-400/60" : "border-ink-border",
         selected && "border-brand-glow/60 shadow-[0_0_0_1px_var(--brand-glow)]",
         tone?.ring,
+        // Hanya node yang benar-benar sedang berjalan yang bergerak. Kanvas yang
+        // diam saat tidak ada run adalah informasi, bukan kekurangan.
         run?.status === "running" && "motion-safe:animate-pulse",
         !data.enabled && "opacity-55 saturate-50",
       )}
@@ -84,6 +102,12 @@ function NodeCardImpl({ data, selected }: NodeProps<StudioNode>) {
             {accent.label}
           </p>
         </div>
+        {data.invalid && (
+          <span title="Config node ini belum lengkap" className="shrink-0 text-rose-300">
+            <TriangleAlert aria-hidden className="size-3.5" strokeWidth={2.2} />
+            <span className="sr-only">Config belum lengkap</span>
+          </span>
+        )}
         {!data.enabled && (
           <span title="Node dimatikan" className="shrink-0 text-ink-muted">
             <EyeOff aria-hidden className="size-3.5" strokeWidth={2.2} />
@@ -95,6 +119,8 @@ function NodeCardImpl({ data, selected }: NodeProps<StudioNode>) {
       <p className="border-t border-ink-border/60 px-3 py-2 text-[11px] leading-snug text-ink-muted">
         {data.enabled ? data.description : "Dilewati saat eksekusi — config-nya tetap tersimpan."}
       </p>
+
+      {health && <HealthRow health={health} peak={data.healthPeak ?? health.avgMs} />}
 
       {tone && (
         <p className="flex items-center gap-1.5 border-t border-ink-border/60 px-3 py-1.5 text-[10px] font-semibold text-ink-muted">
@@ -108,6 +134,46 @@ function NodeCardImpl({ data, selected }: NodeProps<StudioNode>) {
       )}
 
       {data.hasOutput && <Handle type="source" position={Position.Right} className={HANDLE} />}
+    </div>
+  );
+}
+
+/**
+ * Batang rata-rata + jumlah error, dibaca dari seluruh buffer run.
+ *
+ * Node dengan error diwarnai mawar seluruh batangnya, bukan diberi lencana kecil:
+ * pada zoom kanvas yang biasa dipakai, lencana 10px tidak terbaca, sedangkan
+ * perubahan warna satu batang penuh terlihat tanpa memperbesar. Angka errornya
+ * tetap ditulis, jadi maknanya tidak bergantung warna.
+ */
+function HealthRow({ health, peak }: { health: NodeHealth; peak: number }) {
+  const failing = health.errors > 0;
+  const width = peak > 0 ? Math.max(3, Math.min(100, (health.avgMs / peak) * 100)) : 0;
+
+  return (
+    <div className="border-t border-ink-border/60 px-3 py-2">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold">
+        <span className="tabular-money text-ink-foreground">{formatMs(health.avgMs)}</span>
+        <span className="text-ink-muted">rata-rata</span>
+        <span className="tabular-money ml-auto text-ink-muted">{health.samples}×</span>
+      </div>
+
+      <span className="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-ink">
+        <span
+          className={cn("h-full rounded-full", failing ? "bg-rose-400" : "bg-brand-glow")}
+          style={{ width: `${width}%` }}
+        />
+      </span>
+
+      <div className="mt-1.5 flex items-center gap-2 text-[10px] text-ink-muted">
+        <span className="tabular-money">puncak {formatMs(health.maxMs)}</span>
+        {health.errors > 0 && (
+          <span className="tabular-money font-bold text-rose-300">{health.errors} gagal</span>
+        )}
+        {health.skipped > 0 && (
+          <span className="tabular-money ml-auto">{health.skipped} dilewati</span>
+        )}
+      </div>
     </div>
   );
 }

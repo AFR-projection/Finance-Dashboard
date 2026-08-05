@@ -57,7 +57,11 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           </p>
           <ul className="mt-2 space-y-0.5">
             {section.items.map((item) => {
-              const active = current === item.href;
+              // Awalan ikut dihitung, bukan hanya kecocokan persis: Agent Studio
+              // punya sub-halaman (`/agent/kanvas`, `/agent/versi`, …) dan tanpa
+              // ini seluruh sidebar tampak tidak terpilih begitu admin masuk ke
+              // salah satunya. `"/"` aman karena diuji dengan awalan `"//"`.
+              const active = current === item.href || current.startsWith(`${item.href}/`);
               return (
                 <li key={item.href}>
                   <Link

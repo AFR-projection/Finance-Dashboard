@@ -8,34 +8,46 @@
  * Publish memakai tombol putih penuh dan meminta konfirmasi, sedangkan sisanya
  * tombol hantu.
  *
- * Yang berubah dari versi sebelumnya: daftar issue, riwayat revisi, dan pesan
- * status tidak lagi disisipkan sebagai blok di bawah baris aksi. Ketiganya
- * muncul dan hilang mengikuti apa yang admin lakukan, dan sebagai blok inline
- * mereka mendorong kanvas turun-naik setiap kali — mengklik "Riwayat" tidak
- * seharusnya menggeser kotak yang sedang ditarik. Sekarang keduanya popover
- * absolute, dan pesan status menempati slot bertinggi tetap di bawah judul.
+ * Daftar issue dan pesan status tidak disisipkan sebagai blok di bawah baris
+ * aksi. Keduanya muncul dan hilang mengikuti apa yang admin lakukan, dan sebagai
+ * blok inline mereka mendorong kanvas turun-naik setiap kali. Jadi issue jadi
+ * popover absolute, dan pesan status menempati slot bertinggi tetap di bawah judul.
  */
 
 import { useEffect, useId, useRef, useState } from "react";
 import {
+  Activity,
   ChevronDown,
-  History,
+  Keyboard,
+  LayoutGrid,
   Loader2,
   MoreHorizontal,
+  Redo2,
   RotateCcw,
   Save,
   Trash2,
   TriangleAlert,
+  Undo2,
   Upload,
   Wand2,
-  Workflow,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Tone, relativeTime } from "@/components/admin/ui";
-import type { GraphIssue, GraphRevision } from "./shared";
+import { LiveDot, Tone, relativeTime } from "@/components/admin/ui";
+import type { GraphIssue } from "./shared";
 
 export type SaveState = { kind: "idle" | "busy" | "saved" | "error"; message?: string };
+
+/** Sumber tunggal daftar pintasan; handler-nya dipasang di workspace. */
+const SHORTCUTS: Array<[string, string]> = [
+  ["Ctrl+S", "Simpan draft"],
+  ["Ctrl+Z", "Urungkan"],
+  ["Ctrl+Shift+Z", "Ulangi"],
+  ["Ctrl+Shift+L", "Rapikan susunan"],
+  ["Ctrl+Shift+H", "Kesehatan node"],
+  ["Ctrl+Enter", "Publish"],
+  ["Delete", "Hapus node terpilih"],
+];
 
 /**
  * Tombol setinggi 9 dengan sudut `xl`, bukan primitif `inkButton*` dari panel.
@@ -59,28 +71,39 @@ export function Toolbar({
   dirty,
   issues,
   state,
-  revisions,
   onSaveDraft,
   onDiscardDraft,
   onPublish,
-  onRollback,
   onReset,
-  onOpenTest,
-  testOpen,
+  onTest,
+  live,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  onTidy,
+  healthOn,
+  onToggleHealth,
 }: {
   version: number;
   publishedAt: string | null;
   dirty: boolean;
   issues: GraphIssue[];
   state: SaveState;
-  revisions: GraphRevision[];
   onSaveDraft: () => void;
   onDiscardDraft: () => void;
   onPublish: () => void;
-  onRollback: (version: number) => void;
   onReset: () => void;
-  onOpenTest: () => void;
-  testOpen: boolean;
+  onTest: () => void;
+  /** Socket telemetri hidup. Dulu ditampilkan dok bawah; dok sudah tidak ada. */
+  live: boolean;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  onTidy: () => void;
+  healthOn: boolean;
+  onToggleHealth: () => void;
 }) {
   const errors = issues.filter((issue) => issue.level === "error");
   const warnings = issues.filter((issue) => issue.level === "warning");
@@ -88,14 +111,24 @@ export function Toolbar({
 
   return (
     <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-ink-border bg-ink-soft/50 px-3 py-2 backdrop-blur-xl">
-      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-ink text-brand-glow">
-        <Workflow aria-hidden className="size-4.5" strokeWidth={2.2} />
+      {/*
+        Indikator live menggantikan ikon seksi yang dulu di sini: identitas
+        "Agent Studio" sudah dibawa baris tab di atas, sedangkan status socket
+        kehilangan tempatnya waktu dok bawah dihapus. Yang dipajang di sudut
+        paling mudah dilihat sebaiknya hal yang berubah, bukan yang tetap.
+      */}
+      <span
+        title={live ? "Telemetri realtime tersambung" : "Socket terputus — jatuh ke polling"}
+        className="grid size-9 shrink-0 place-items-center rounded-xl bg-ink"
+      >
+        <LiveDot live={live} />
+        <span className="sr-only">{live ? "Realtime aktif" : "Realtime terputus"}</span>
       </span>
 
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <h1 className="truncate text-sm font-bold tracking-[-0.01em] text-ink-foreground">
-            Agent Studio
+            Kanvas
           </h1>
           <Tone tone={version === 0 ? "neutral" : "positive"}>
             {version === 0 ? "bawaan" : `v${version}`}
@@ -171,65 +204,52 @@ export function Toolbar({
           </Popover>
         )}
 
+        {/*
+          Kelompok alat kanvas. Semuanya punya pintasan keyboard, dan tetap
+          dipasang sebagai tombol karena pintasan yang tidak punya wujud terlihat
+          hanya berguna bagi orang yang sudah tahu ia ada.
+        */}
+        <div className="hidden items-center gap-1.5 md:flex">
+          <IconButton
+            icon={Undo2}
+            label="Urungkan (Ctrl+Z)"
+            disabled={!canUndo}
+            onClick={onUndo}
+          />
+          <IconButton
+            icon={Redo2}
+            label="Ulangi (Ctrl+Shift+Z)"
+            disabled={!canRedo}
+            onClick={onRedo}
+          />
+          <IconButton icon={LayoutGrid} label="Rapikan susunan (Ctrl+Shift+L)" onClick={onTidy} />
+          <IconButton
+            icon={Activity}
+            label={
+              healthOn
+                ? "Sembunyikan kesehatan node (Ctrl+Shift+H)"
+                : "Tampilkan kesehatan node di kartu (Ctrl+Shift+H)"
+            }
+            pressed={healthOn}
+            onClick={onToggleHealth}
+          />
+        </div>
+
+        <span aria-hidden className="mx-0.5 hidden h-6 w-px bg-ink-border md:block" />
+
         <button
           type="button"
-          onClick={onOpenTest}
-          aria-pressed={testOpen}
-          className={cn(BAR_GHOST, testOpen && "border-brand-glow/40 text-brand-glow")}
+          onClick={onTest}
+          title="Menyimpan draft lalu membuka halaman uji coba."
+          className={BAR_GHOST}
         >
           <Wand2 aria-hidden className="size-3.5" strokeWidth={2.2} />
-          <span className="hidden sm:inline">Jalankan tes</span>
+          <span className="hidden sm:inline">Uji coba</span>
         </button>
 
-        <Popover
-          width="w-[22rem]"
-          label={
-            <>
-              <History aria-hidden className="size-3.5" strokeWidth={2.2} />
-              <span className="hidden md:inline">Riwayat</span>
-              <span className="tabular-money">{revisions.length}</span>
-            </>
-          }
-        >
-          {revisions.length === 0 ? (
-            <p className="py-3 text-center text-[11px] text-ink-muted">
-              Belum ada revisi. Riwayat mulai terisi setelah publish pertama.
-            </p>
-          ) : (
-            <ul className="-mx-1 divide-y divide-ink-border/40">
-              {revisions.map((revision) => (
-                <li key={revision.version} className="flex items-center gap-2 px-1 py-2 text-[11px]">
-                  <span className="tabular-money w-8 shrink-0 font-bold text-ink-foreground">
-                    v{revision.version}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-ink-muted">
-                      {revision.note || "tanpa catatan"}
-                    </span>
-                    <span className="block text-[10px] text-ink-muted/70">
-                      {relativeTime(revision.createdAt)}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => onRollback(revision.version)}
-                    disabled={busy || revision.version === version}
-                    className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-ink-border px-2 text-[10px] font-semibold text-ink-muted outline-none transition-colors hover:text-ink-foreground focus-visible:ring-3 focus-visible:ring-brand-glow/40 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {revision.version === version ? (
-                      "aktif"
-                    ) : (
-                      <>
-                        <RotateCcw aria-hidden className="size-3" strokeWidth={2.4} />
-                        Kembalikan
-                      </>
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Popover>
+        {/* Riwayat revisi dan tombol rollback-nya pindah ke halaman Versi. Di sini
+            ia cuma popover sempit yang menampilkan potongan catatan — dan rollback
+            adalah aksi yang paling tidak pantas dipicu dari dalam popover sempit. */}
 
         <Popover
           width="w-64"
@@ -239,6 +259,39 @@ export function Toolbar({
         >
           {(close) => (
             <div className="-mx-1 space-y-0.5">
+              {/* Duplikat pintasan untuk layar sempit, tempat kelompok ikon di atas disembunyikan. */}
+              <div className="space-y-0.5 md:hidden">
+                <MenuItem
+                  icon={Undo2}
+                  disabled={!canUndo}
+                  onClick={() => {
+                    close();
+                    onUndo();
+                  }}
+                >
+                  Urungkan
+                </MenuItem>
+                <MenuItem
+                  icon={LayoutGrid}
+                  onClick={() => {
+                    close();
+                    onTidy();
+                  }}
+                >
+                  Rapikan susunan
+                </MenuItem>
+                <MenuItem
+                  icon={Activity}
+                  onClick={() => {
+                    close();
+                    onToggleHealth();
+                  }}
+                >
+                  {healthOn ? "Sembunyikan kesehatan node" : "Tampilkan kesehatan node"}
+                </MenuItem>
+                <span aria-hidden className="my-1 block h-px bg-ink-border/60" />
+              </div>
+
               <MenuItem
                 icon={RotateCcw}
                 disabled={busy}
@@ -266,6 +319,27 @@ export function Toolbar({
                   Kembali ke susunan yang sedang dipublish.
                 </span>
               </MenuItem>
+
+              <span aria-hidden className="my-1 block h-px bg-ink-border/60" />
+
+              <div className="px-2.5 py-1.5">
+                <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-ink-muted">
+                  <Keyboard aria-hidden className="size-3" strokeWidth={2.4} />
+                  Pintasan
+                </p>
+                <dl className="mt-1.5 space-y-1">
+                  {SHORTCUTS.map(([keys, what]) => (
+                    <div key={keys} className="flex items-center gap-2 text-[11px]">
+                      <dt className="w-24 shrink-0">
+                        <kbd className="rounded border border-ink-border bg-ink px-1.5 py-0.5 font-mono text-[10px] text-ink-foreground">
+                          {keys}
+                        </kbd>
+                      </dt>
+                      <dd className="min-w-0 flex-1 text-ink-muted">{what}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
             </div>
           )}
         </Popover>
@@ -303,6 +377,37 @@ export function Toolbar({
         </button>
       </div>
     </header>
+  );
+}
+
+function IconButton({
+  icon: Icon,
+  label,
+  pressed,
+  disabled,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  pressed?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      aria-pressed={pressed}
+      title={label}
+      className={cn(
+        "grid size-9 cursor-pointer place-items-center rounded-xl border border-ink-border text-ink-muted outline-none transition-colors hover:border-ink-muted/40 hover:text-ink-foreground focus-visible:ring-3 focus-visible:ring-brand-glow/40 disabled:cursor-not-allowed disabled:opacity-30",
+        pressed && "border-brand-glow/40 bg-brand-glow/10 text-brand-glow",
+      )}
+    >
+      <Icon aria-hidden className="size-4" strokeWidth={2.2} />
+    </button>
   );
 }
 

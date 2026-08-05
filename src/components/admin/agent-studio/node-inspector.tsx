@@ -10,7 +10,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { CheckSquare, Search, Square, Trash2 } from "lucide-react";
+import { CheckSquare, Lock, Search, Square, Trash2, Unlink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { inkInput } from "@/components/admin/ui";
 import { NodeIcon } from "./node-icon";
@@ -32,6 +32,7 @@ export function NodeInspector({
   onToggleEnabled,
   onRename,
   onDelete,
+  onDetach,
 }: {
   node: InspectorNode | null;
   definition: NodeDefinition | null;
@@ -40,6 +41,7 @@ export function NodeInspector({
   onToggleEnabled: (enabled: boolean) => void;
   onRename: (label: string) => void;
   onDelete: () => void;
+  onDetach: () => void;
 }) {
   if (!node || !definition) {
     return (
@@ -113,18 +115,41 @@ export function NodeInspector({
         ))}
       </div>
 
-      {!definition.required && (
-        <div className="border-t border-ink-border/70 px-4 py-3">
+      {/*
+        Node wajib tidak menyembunyikan bagian ini — ia menjelaskannya.
+        Sebelumnya seluruh blok dilewati untuk tujuh dari dua belas tipe node,
+        dan dari kursi admin itu terbaca persis seperti fitur hapus yang tidak
+        pernah selesai dibuat. Aturannya sendiri benar: mencabut `llm.reasoner`
+        membuat graph gagal publish. Yang salah cuma penyampaiannya.
+      */}
+      <div className="space-y-2 border-t border-ink-border/70 px-4 py-3">
+        <button
+          type="button"
+          onClick={onDetach}
+          className="inline-flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-ink-border text-xs font-semibold text-ink-muted outline-none transition-colors hover:text-ink-foreground focus-visible:ring-3 focus-visible:ring-brand-glow/40"
+        >
+          <Unlink aria-hidden className="size-3.5" strokeWidth={2.2} />
+          Lepas semua koneksi
+        </button>
+
+        {definition.required ? (
+          <p className="flex items-start gap-1.5 rounded-xl border border-ink-border/70 bg-ink/40 px-3 py-2.5 text-[11px] leading-snug text-ink-muted">
+            <Lock aria-hidden className="mt-px size-3.5 shrink-0" strokeWidth={2.2} />
+            <span>
+              Node wajib: tidak bisa dicabut maupun dimatikan. Jalur ini gagal dipublish tanpanya.
+            </span>
+          </p>
+        ) : (
           <button
             type="button"
             onClick={onDelete}
             className="inline-flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-rose-400/30 text-xs font-semibold text-rose-300 outline-none transition-colors hover:bg-rose-500/10 focus-visible:ring-3 focus-visible:ring-rose-400/40"
           >
             <Trash2 aria-hidden className="size-3.5" strokeWidth={2.2} />
-            Hapus node ini
+            Cabut node ini
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

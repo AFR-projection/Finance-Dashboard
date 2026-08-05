@@ -93,11 +93,20 @@ export type NodeRunState = {
   detail?: string;
 };
 
-export const RUN_TONES: Record<NodeRunState["status"], { ring: string; dot: string; label: string }> = {
-  running: { ring: "ring-amber-300/70", dot: "bg-amber-300", label: "berjalan" },
-  ok: { ring: "ring-brand-glow/70", dot: "bg-brand-glow", label: "selesai" },
-  skipped: { ring: "ring-ink-muted/40", dot: "bg-ink-muted/60", label: "dilewati" },
-  error: { ring: "ring-rose-400/70", dot: "bg-rose-400", label: "gagal" },
+/**
+ * `ring` mewarnai cincin kartu di kanvas, `dot` dipakai titik jejak dan batang
+ * waterfall, `text` label statusnya. Ketiganya sengaja satu objek: warna status
+ * yang sama harus berarti hal yang sama di kanvas maupun di konsol, dan dua peta
+ * terpisah akan menyimpang pada perubahan pertama yang hanya menyentuh satu sisi.
+ */
+export const RUN_TONES: Record<
+  NodeRunState["status"],
+  { ring: string; dot: string; text: string; label: string }
+> = {
+  running: { ring: "ring-amber-300/70", dot: "bg-amber-300", text: "text-amber-200", label: "berjalan" },
+  ok: { ring: "ring-brand-glow/70", dot: "bg-brand-glow", text: "text-brand-glow", label: "selesai" },
+  skipped: { ring: "ring-ink-muted/40", dot: "bg-ink-muted/60", text: "text-ink-muted", label: "dilewati" },
+  error: { ring: "ring-rose-400/70", dot: "bg-rose-400", text: "text-rose-300", label: "gagal" },
 };
 
 export type GraphRevision = {
@@ -119,13 +128,19 @@ export type HeartbeatRunRow = {
   durationMs: number | null;
 };
 
+/**
+ * Yang dibutuhkan kanvas — dan hanya itu.
+ *
+ * Riwayat revisi sengaja tidak di sini meski route API mengirimkannya: kanvas
+ * tidak lagi menampilkan riwayat, dan field yang ada di tipe tapi tidak dipakai
+ * akan mengundang halaman berikutnya memuatnya "karena sudah ada".
+ */
 export type StudioPayload = {
   version: number;
   published: AgentGraphData;
   draft: AgentGraphData | null;
   publishedAt: string | null;
   updatedBy: string | null;
-  revisions: GraphRevision[];
   catalogue: NodeDefinition[];
   defaultGraph: AgentGraphData;
   issues: GraphIssue[];

@@ -8,22 +8,41 @@
  * hanya menyimpan puluhan terakhir, sedangkan siklus heartbeat dibaca dari tabel
  * karena di situlah bukti bahwa fitur proaktif benar-benar jalan tiap hari.
  *
- * File ini sengaja hanya memegang daftarnya. Tab, indikator live, dan lipatan
- * dok ada di `dock.tsx` — memisahkannya membuat dok bisa menampung tab ketiga
- * (uji coba) tanpa daftar-daftar ini ikut tahu soal itu.
+ * Run yang dibuka digambar sebagai waterfall, bukan daftar. Sebuah run yang
+ * lambat hampir selalu lambat karena satu node, dan daftar bernomor menuntut
+ * pembacanya membandingkan belasan angka untuk menemukan node itu. Pada
+ * waterfall, batang terpanjang menjawabnya tanpa dibaca. Offsetnya bukan hasil
+ * penjumlahan berurutan melainkan selisih timestamp asli tiap event, jadi jeda
+ * di antara dua node — menunggu penyedia, misalnya — ikut terlihat sebagai jarak.
  */
 
 import { useMemo, useState } from "react";
 import { CircleSlash, Radio } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { EmptyState, Tone, relativeTime } from "@/components/admin/ui";
+import { EmptyState, Tone, relativeTime, type ToneName } from "@/components/admin/ui";
 import { RUN_TONES, formatMs, type AgentTelemetryEvent, type HeartbeatRunRow } from "./shared";
 
-const HEARTBEAT_TONE: Record<string, "positive" | "neutral" | "warning" | "danger"> = {
-  sent: "positive",
-  saved: "neutral",
-  skipped: "warning",
-  failed: "danger",
+/**
+ * Kunci di sini HURUF BESAR karena itulah yang ditulis enum `HeartbeatStatus`.
+ *
+ * Versi sebelumnya memakai huruf kecil, jadi setiap baris jatuh ke `?? "neutral"`
+ * — termasuk baris FAILED, yang tampil dengan warna yang sama persis dengan
+ * baris yang berhasil terkirim.
+ */
+const HEARTBEAT_TONE: Record<string, ToneName> = {
+  SENT: "positive",
+  SAVED: "neutral",
+  SKIPPED: "warning",
+  FAILED: "danger",
+  RUNNING: "info",
+};
+
+const HEARTBEAT_LABEL: Record<string, string> = {
+  SENT: "terkirim",
+  SAVED: "disimpan",
+  SKIPPED: "dilewati",
+  FAILED: "gagal",
+  RUNNING: "berjalan",
 };
 
 const CADENCE_LABEL: Record<string, string> = {
@@ -75,7 +94,9 @@ export function HeartbeatList({ rows }: { rows: HeartbeatRunRow[] }) {
       {rows.map((run) => (
         <li key={run.id} className="px-4 py-2.5 text-xs">
           <div className="flex flex-wrap items-center gap-2.5">
-            <Tone tone={HEARTBEAT_TONE[run.status] ?? "neutral"}>{run.status}</Tone>
+            <Tone tone={HEARTBEAT_TONE[run.status] ?? "neutral"}>
+              {HEARTBEAT_LABEL[run.status] ?? run.status}
+            </Tone>
             <span className="font-semibold text-ink-foreground">
               {CADENCE_LABEL[run.cadence] ?? run.cadence}
             </span>
@@ -105,6 +126,15 @@ export function HeartbeatList({ rows }: { rows: HeartbeatRunRow[] }) {
   );
 }
 
+export type RunNodeEntry = {
+  nodeId: string;
+  status: keyof typeof RUN_TONES;
+  ms?: number;
+  detail?: string;
+  /** Waktu event dicatat, dipakai menghitung offset batang di waterfall. */
+  at: string;
+};
+
 export type GroupedRun = {
   runId: string;
   track: string;
@@ -113,7 +143,7 @@ export type GroupedRun = {
   ms?: number;
   status?: "ok" | "error";
   toolsUsed?: string[];
-  nodes: Array<{ nodeId: string; status: keyof typeof RUN_TONES; ms?: number; detail?: string }>;
+  nodes: RunNodeEntry[];
 };
 
 /** Event datang terbaru-dulu dan bisa tercecer; pengelompokan menyusunnya ulang. */
@@ -145,6 +175,7 @@ export function groupRuns(events: AgentTelemetryEvent[]): GroupedRun[] {
         status: event.status,
         ms: event.ms,
         detail: event.detail,
+        at: event.at,
       });
     }
   }
@@ -194,29 +225,76 @@ function RunRow({ run, nodeLabels }: { run: GroupedRun; nodeLabels: Record<strin
         <span className="text-ink-muted">{relativeTime(run.at)}</span>
       </button>
 
-      {open && (
-        <ol className="space-y-1 border-t border-ink-border/40 bg-ink/30 px-4 py-2.5">
-          {run.nodes.map((node) => {
-            const tone = RUN_TONES[node.status];
-            return (
-              <li key={node.nodeId} className="flex items-center gap-2 text-[11px]">
-                <span className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
-                <span className="truncate font-semibold text-ink-foreground">
-                  {nodeLabels[node.nodeId] ?? node.nodeId}
-                </span>
-                <span className="text-ink-muted">{tone.label}</span>
-                {node.detail && <span className="truncate text-ink-muted">· {node.detail}</span>}
-                <span className="tabular-money ml-auto shrink-0 text-ink-muted">
-                  {formatMs(node.ms)}
-                </span>
-              </li>
-            );
-          })}
-          {run.toolsUsed && run.toolsUsed.length > 0 && (
-            <li className="pt-1 text-[10px] text-ink-muted">Tool: {run.toolsUsed.join(", ")}</li>
-          )}
-        </ol>
-      )}
+      {open && <Waterfall run={run} nodeLabels={nodeLabels} />}
     </li>
+  );
+}
+
+/**
+ * Batang per node pada satu sumbu waktu bersama.
+ *
+ * Node yang tidak membawa durasi (dilewati, atau masih berjalan saat event
+ * ditulis) digambar sebagai penanda tipis di posisinya, bukan dihilangkan —
+ * lubang di tengah waterfall lebih membingungkan daripada batang selebar satu
+ * pixel.
+ */
+function Waterfall({ run, nodeLabels }: { run: GroupedRun; nodeLabels: Record<string, string> }) {
+  const bars = useMemo(() => {
+    const startedAt = new Date(run.at).getTime();
+    const entries = run.nodes.map((node) => {
+      const endedAt = new Date(node.at).getTime();
+      const ms = node.ms ?? 0;
+      return { ...node, ms, startOffset: Math.max(0, endedAt - ms - startedAt) };
+    });
+
+    // Skala diambil dari data yang benar-benar ada. `run.ms` bisa belum terisi
+    // (run masih berjalan) dan bisa lebih pendek dari ujung node terakhir kalau
+    // jam proses worker sedikit berbeda dari jam proses web.
+    const span = Math.max(
+      1,
+      run.ms ?? 0,
+      ...entries.map((entry) => entry.startOffset + entry.ms),
+    );
+    return { entries, span };
+  }, [run]);
+
+  return (
+    <div className="space-y-1 border-t border-ink-border/40 bg-ink/40 px-4 py-2.5">
+      {bars.entries.map((entry) => {
+        const tone = RUN_TONES[entry.status];
+        const left = (entry.startOffset / bars.span) * 100;
+        const width = (entry.ms / bars.span) * 100;
+
+        return (
+          <div key={entry.nodeId} className="flex items-center gap-2 text-[11px]">
+            <span
+              className="w-32 shrink-0 truncate font-semibold text-ink-foreground sm:w-44"
+              title={entry.detail ? `${nodeLabels[entry.nodeId] ?? entry.nodeId} · ${entry.detail}` : undefined}
+            >
+              {nodeLabels[entry.nodeId] ?? entry.nodeId}
+            </span>
+
+            <span className="relative h-3.5 min-w-0 flex-1 overflow-hidden rounded bg-ink-border/30">
+              <span
+                className={cn("absolute inset-y-0 rounded-[3px]", tone.dot)}
+                style={{
+                  left: `${Math.min(99, left)}%`,
+                  width: `${Math.max(1.2, Math.min(100 - left, width))}%`,
+                }}
+              />
+            </span>
+
+            <span className="tabular-money w-14 shrink-0 text-right text-ink-muted">
+              {formatMs(entry.ms || undefined)}
+            </span>
+            <span className={cn("w-14 shrink-0 truncate text-right", tone.text)}>{tone.label}</span>
+          </div>
+        );
+      })}
+
+      {run.toolsUsed && run.toolsUsed.length > 0 && (
+        <p className="pt-1 text-[10px] text-ink-muted">Tool: {run.toolsUsed.join(", ")}</p>
+      )}
+    </div>
   );
 }

@@ -22,7 +22,7 @@ export type GraphIssue = {
  *
  * Node dengan peringkat sama boleh ditukar bebas (mis. riwayat vs konteks).
  */
-const PHASE_RANK: Record<AgentNodeKind, number> = {
+export const PHASE_RANK: Record<AgentNodeKind, number> = {
   "trigger.chat": 0,
   "memory.conversation": 1,
   "context.loader": 1,
