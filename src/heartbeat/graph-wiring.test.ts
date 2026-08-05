@@ -164,13 +164,42 @@ describe("node Penjadwal", () => {
 describe("node Analis LLM", () => {
   it("meneruskan temperature dan model khusus ke analis", async () => {
     mocks.loadHeartbeatPlan.mockResolvedValue(
-      planWith((p) => ({ ...p, analyst: { modelOverride: "khusus/model", temperature: 0.9 } })),
+      planWith((p) => ({
+        ...p,
+        analyst: { ...p.analyst, modelOverride: "khusus/model", temperature: 0.9 },
+      })),
     );
 
     await tickHeartbeat(DAILY_AT);
 
     expect(mocks.analyzeHeartbeat).toHaveBeenCalledWith(
-      expect.objectContaining({ analyst: { modelOverride: "khusus/model", temperature: 0.9 } }),
+      expect.objectContaining({
+        analyst: expect.objectContaining({ modelOverride: "khusus/model", temperature: 0.9 }),
+      }),
+    );
+  });
+
+  // Tick heartbeat mengerjakan user berurutan dalam satu proses, jadi batas
+  // waktu di sini bukan kenyamanan — ia yang mencegah satu user yang macet
+  // menahan giliran semua user berikutnya.
+  it("meneruskan batas waktu dan percobaan ulang ke analis", async () => {
+    mocks.loadHeartbeatPlan.mockResolvedValue(
+      planWith((p) => ({
+        ...p,
+        analyst: { ...p.analyst, requestTimeoutMs: 12_000, maxRetries: 4, totalBudgetMs: 30_000 },
+      })),
+    );
+
+    await tickHeartbeat(DAILY_AT);
+
+    expect(mocks.analyzeHeartbeat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        analyst: expect.objectContaining({
+          requestTimeoutMs: 12_000,
+          maxRetries: 4,
+          totalBudgetMs: 30_000,
+        }),
+      }),
     );
   });
 });

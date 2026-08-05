@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/ai/usage", () => ({ recordAiUsage: vi.fn() }));
 
-import { analyzeHeartbeat } from "./analyst";
+import { analyzeHeartbeat, DEFAULT_ANALYST_SETTINGS } from "./analyst";
 import type { HeartbeatSnapshot } from "./signals";
+
+const ANALYST = DEFAULT_ANALYST_SETTINGS;
 
 const SNAPSHOT = { cadence: "daily" } as unknown as HeartbeatSnapshot;
 const CONFIG = {
@@ -101,6 +103,23 @@ describe("analyzeHeartbeat", () => {
       expect(result.detail).toContain("insufficient credits");
       expect(result.detail).toContain("test/fallback");
     }
+  });
+
+  // Tick heartbeat mengerjakan user berurutan dalam satu proses. Tanpa batas
+  // total, satu user dengan penyedia yang lambat menahan giliran semua user
+  // berikutnya sekaligus menghentikan tulisan liveness yang dibaca /system.
+  it("berhenti menyapu rantai model begitu batas waktu total habis", async () => {
+    const fetchMock = stubFetch();
+
+    const result = await analyzeHeartbeat({
+      snapshot: SNAPSHOT,
+      config: CONFIG,
+      analyst: { ...ANALYST, totalBudgetMs: 0 },
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.detail).toContain("batas waktu total");
   });
 
   it("tidak memanggil penyedia sama sekali tanpa API key", async () => {

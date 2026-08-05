@@ -19,6 +19,7 @@ import type { ChatPlan } from "./graph/compile";
 import { loadChatPlan } from "./graph/store";
 import type { AgentNodeKind } from "./graph/types";
 import { emitAgentEvent, newRunId } from "@/lib/agent-telemetry";
+import { callOpenRouter } from "./openrouter";
 
 /**
  * Pelapor jalannya satu run ke kanvas Agent Studio.
@@ -117,6 +118,14 @@ export type AgentReply = {
   walletPrompts?: WalletPrompt[];
   /** Tokens burned across every round and every model in the fallback chain. */
   usage?: { promptTokens: number; outputTokens: number; model: string };
+  /**
+   * Terisi kalau balasannya adalah teks darurat, bukan jawaban model.
+   *
+   * User tetap menerima kalimat yang sopan — tapi konsol admin dulu ikut
+   * menerima kalimat itu sebagai kesuksesan, karena `trace.end("ok")` dipanggil
+   * tanpa syarat. Gangguan penyedia total tampak hijau di kanvas.
+   */
+  failure?: string;
 };
 
 export type AgentMessage = {
@@ -340,57 +349,74 @@ export async function runFinanceAgent(params: {
   const plan = params.plan ?? (await loadChatPlan());
   const trace = createChatTracer(plan, channel);
 
-  // Kanal yang dimatikan di node pemicu ditolak di sini, sebelum satu token pun
-  // dibelanjakan.
-  if (!plan.channels.includes(channel)) {
-    trace.node("trigger.chat", "skipped", `kanal ${channel} tidak dilayani`);
-    trace.end("ok", []);
-    return {
-      text: "Agent sedang tidak melayani kanal ini. Coba lewat kanal lain atau hubungi admin.",
-      toolsUsed: [],
-    };
-  }
-  trace.node("trigger.chat", "ok", channel);
+  // Satu run harus selalu punya akhir. Tanpa penjaga ini, sebuah lemparan di
+  // tengah jalan meninggalkan baris "berjalan" di konsol admin selamanya —
+  // tidak bisa dibedakan dari run yang benar-benar masih bekerja.
+  let ended = false;
+  const finish = (status: "ok" | "error", toolsUsed: string[]) => {
+    if (ended) return;
+    ended = true;
+    trace.end(status, toolsUsed);
+  };
 
-  const historyStartedAt = Date.now();
-  const history = plan.conversation
-    ? await loadHistory(userId, channel, plan.conversation)
-    : [];
-  trace.node(
-    "memory.conversation",
-    plan.conversation ? "ok" : "skipped",
-    plan.conversation ? `${history.length} pesan` : undefined,
-    Date.now() - historyStartedAt,
-  );
+  try {
+    // Kanal yang dimatikan di node pemicu ditolak di sini, sebelum satu token pun
+    // dibelanjakan.
+    if (!plan.channels.includes(channel)) {
+      trace.node("trigger.chat", "skipped", `kanal ${channel} tidak dilayani`);
+      finish("ok", []);
+      return {
+        text: "Agent sedang tidak melayani kanal ini. Coba lewat kanal lain atau hubungi admin.",
+        toolsUsed: [],
+      };
+    }
+    trace.node("trigger.chat", "ok", channel);
 
-  const reply = await runOpenRouter({ userId, message, config, channel, history, plan, trace });
-
-  // Recorded here rather than at each return inside the model loop: there are a
-  // dozen exit paths and a missed one would be free tokens.
-  if (reply.usage) {
-    await recordAiUsage({
-      userId,
-      source: "CHAT",
-      model: reply.usage.model,
-      usage: { promptTokens: reply.usage.promptTokens, outputTokens: reply.usage.outputTokens },
-    });
-  }
-
-  if (plan.conversation) {
-    await appendHistory(
-      userId,
-      channel,
-      [
-        { role: "user", content: message },
-        { role: "assistant", content: reply.text },
-      ],
-      plan.conversation,
+    const historyStartedAt = Date.now();
+    const history = plan.conversation
+      ? await loadHistory(userId, channel, plan.conversation)
+      : [];
+    trace.node(
+      "memory.conversation",
+      plan.conversation ? "ok" : "skipped",
+      plan.conversation ? `${history.length} pesan` : undefined,
+      Date.now() - historyStartedAt,
     );
-  }
 
-  trace.node("dispatch.reply", "ok", `${reply.text.length} karakter`);
-  trace.end("ok", reply.toolsUsed);
-  return reply;
+    const reply = await runOpenRouter({ userId, message, config, channel, history, plan, trace });
+
+    // Recorded here rather than at each return inside the model loop: there are a
+    // dozen exit paths and a missed one would be free tokens.
+    if (reply.usage) {
+      await recordAiUsage({
+        userId,
+        source: "CHAT",
+        model: reply.usage.model,
+        usage: { promptTokens: reply.usage.promptTokens, outputTokens: reply.usage.outputTokens },
+      });
+    }
+
+    if (plan.conversation) {
+      await appendHistory(
+        userId,
+        channel,
+        [
+          { role: "user", content: message },
+          { role: "assistant", content: reply.text },
+        ],
+        plan.conversation,
+      );
+    }
+
+    // Teks darurat memang terkirim, jadi node pengiriman tetap "ok" — tapi
+    // run-nya bukan kesuksesan, dan konsol harus mengatakannya.
+    trace.node("dispatch.reply", "ok", `${reply.text.length} karakter`);
+    finish(reply.failure ? "error" : "ok", reply.toolsUsed);
+    return reply;
+  } catch (error) {
+    finish("error", []);
+    throw error;
+  }
 }
 
 async function runOpenRouter(params: {
@@ -509,7 +535,21 @@ async function runOpenRouterInner(
   const { primary, fallbacks } = buildModelChain(params.config, plan);
   let lastError = "Unknown";
 
+  /**
+   * Batas keras seluruh balasan.
+   *
+   * Batas per panggilan saja tidak cukup: enam putaran × tiga model × tiga
+   * percobaan masih bisa menahan satu pesan berpuluh menit. User yang menunggu
+   * sudah lama menutup jendelanya, dan di Telegram pesannya terlanjur dianggap
+   * hilang.
+   */
+  const deadlineAt = Date.now() + Math.max(0, plan.llm.totalBudgetMs);
+
   for (const currentModel of [primary, ...fallbacks]) {
+    if (Date.now() >= deadlineAt) {
+      lastError = "batas waktu total balasan habis";
+      break;
+    }
     usage.model = currentModel;
     const messages: Msg[] = [
       { role: "system", content: systemPrompt },
@@ -523,17 +563,16 @@ async function runOpenRouterInner(
 
     try {
       for (let round = 0; round < maxRounds; round++) {
+        if (Date.now() >= deadlineAt) throw new Error("batas waktu total balasan habis");
         const roundStartedAt = Date.now();
         trace.node("llm.reasoner", "running", `putaran ${round + 1}/${maxRounds}`);
-        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${params.config.apiKey}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-            "X-Title": "Ledgerly Finance Agent",
-          },
-          body: JSON.stringify({
+        const call = await callOpenRouter({
+          apiKey: params.config.apiKey,
+          title: "Ledgerly Finance Agent",
+          timeoutMs: plan.llm.requestTimeoutMs,
+          maxRetries: plan.llm.maxRetries,
+          deadlineAt,
+          body: {
             model: currentModel,
             messages,
             // Kunci tools dihilangkan sama sekali kalau tidak ada tool aktif —
@@ -548,15 +587,15 @@ async function runOpenRouterInner(
                 }
               : {}),
             temperature: plan.llm.temperature,
-          }),
+          },
         });
 
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(`OpenRouter ${res.status}: ${errText}`);
-        }
+        // Percobaan ulang untuk gangguan sementara sudah habis di dalam
+        // transport. Yang sampai ke sini berarti model ini memang tidak bisa
+        // dipakai sekarang — barulah rantai fallback layak dicoba.
+        if (!call.ok) throw new Error(`OpenRouter ${currentModel}: ${call.error}`);
 
-        const json = (await res.json()) as {
+        const json = call.json as unknown as {
           choices: Array<{
             message: Msg & {
               tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
@@ -722,16 +761,21 @@ async function runOpenRouterInner(
           data,
           walletPrompt: walletPrompts[0],
           walletPrompts,
+          failure: lastError,
         };
       }
     }
   }
 
+  // Node `llm.reasoner` sudah ditandai error di blok catch tiap model, jadi
+  // kanvas menunjuk tempat yang benar. Yang ditambahkan `failure` adalah status
+  // run secara keseluruhan.
   console.error("[finance-agent] All provider models failed", { error: lastError });
   return {
     text: "Maaf, layanan analisis keuangan sedang tidak tersedia. Data Anda tidak diubah; silakan coba lagi sebentar lagi.",
     toolsUsed,
     data,
+    failure: lastError,
   };
 }
 

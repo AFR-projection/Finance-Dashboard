@@ -9,6 +9,7 @@
 import pino from "pino";
 import type { AiRuntimeConfig } from "@/ai/agent";
 import { recordAiUsage } from "@/ai/usage";
+import { callOpenRouter } from "@/ai/openrouter";
 import type { HeartbeatSnapshot } from "./signals";
 
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
@@ -51,11 +52,20 @@ export type HeartbeatAnalysisResult =
  * Defaultnya wajib sama dengan angka yang dulu di-hardcode di file ini, supaya
  * instalasi yang belum pernah mem-publish graph berperilaku persis seperti dulu.
  */
-export type HeartbeatAnalystSettings = { modelOverride: string; temperature: number };
+export type HeartbeatAnalystSettings = {
+  modelOverride: string;
+  temperature: number;
+  requestTimeoutMs: number;
+  maxRetries: number;
+  totalBudgetMs: number;
+};
 
 export const DEFAULT_ANALYST_SETTINGS: HeartbeatAnalystSettings = {
   modelOverride: "",
   temperature: 0.4,
+  requestTimeoutMs: 45_000,
+  maxRetries: 2,
+  totalBudgetMs: 120_000,
 };
 
 const DAILY_BRIEF = `Tugasmu: brief pagi. Angkat maksimal 2 hal paling penting hari ini, lalu satu aksi konkret yang bisa dikerjakan hari ini.`;
@@ -191,6 +201,16 @@ export async function analyzeHeartbeat(params: {
   const models = [primary, ...(config.fallbackModels ?? []).filter((m) => m !== primary)];
 
   /**
+   * Batas keras untuk seluruh analisis satu user.
+   *
+   * Ini bukan kenyamanan, ini isolasi. `tickHeartbeat` mengerjakan user secara
+   * berurutan dalam satu proses; tanpa batas ini satu panggilan yang macet
+   * menahan giliran setiap user berikutnya DAN menghentikan tulisan liveness
+   * yang dibaca panel /system — worker sehat pun akan dilaporkan mati.
+   */
+  const deadlineAt = Date.now() + Math.max(0, analyst.totalBudgetMs);
+
+  /**
    * Satu panggilan ke satu model.
    *
    * `jsonMode` dipisah sebagai parameter karena `response_format` adalah satu-
@@ -205,46 +225,40 @@ export async function analyzeHeartbeat(params: {
   ): Promise<
     { ok: true; analysis: HeartbeatAnalysis } | { ok: false; error: string; retryPlain: boolean }
   > => {
-    let res: Response;
-    try {
-      res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-          "X-Title": "Ledgerly Heartbeat",
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: systemPrompt(snapshot.cadence) },
-            {
-              role: "user",
-              content: `Data keuangan user (satu-satunya sumber angka):\n${JSON.stringify(snapshot, null, 1)}`,
-            },
-          ],
-          temperature: analyst.temperature,
-          ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
-        }),
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: `jaringan: ${message}`, retryPlain: false };
-    }
+    const result = await callOpenRouter({
+      apiKey: config.apiKey,
+      title: "Ledgerly Heartbeat",
+      timeoutMs: analyst.requestTimeoutMs,
+      maxRetries: analyst.maxRetries,
+      deadlineAt,
+      body: {
+        model,
+        messages: [
+          { role: "system", content: systemPrompt(snapshot.cadence) },
+          {
+            role: "user",
+            content: `Data keuangan user (satu-satunya sumber angka):\n${JSON.stringify(snapshot, null, 1)}`,
+          },
+        ],
+        temperature: analyst.temperature,
+        ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
+      },
+    });
 
-    if (!res.ok) {
-      const text = (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 200);
+    if (!result.ok) {
       // 400 sering justru berarti model ini tidak mengenal `response_format`,
       // jadi khusus itu percobaan tanpa mode JSON masih masuk akal.
-      return { ok: false, error: `HTTP ${res.status}: ${text}`, retryPlain: jsonMode && res.status === 400 };
+      return {
+        ok: false,
+        error: result.error,
+        retryPlain: jsonMode && result.status === 400,
+      };
     }
 
-    const json = (await res.json().catch(() => null)) as {
+    const json = result.json as {
       choices?: Array<{ message?: { content?: string | null } }>;
       usage?: { prompt_tokens?: number; completion_tokens?: number };
-    } | null;
-    if (!json) return { ok: false, error: "balasan bukan JSON", retryPlain: false };
+    };
 
     if (params.userId && json.usage) {
       await recordAiUsage({
@@ -266,6 +280,10 @@ export async function analyzeHeartbeat(params: {
   const failures: string[] = [];
 
   for (const model of models) {
+    if (Date.now() >= deadlineAt) {
+      failures.push("batas waktu total analisis habis sebelum sisa model dicoba");
+      break;
+    }
     for (const jsonMode of [true, false]) {
       const attempt = await callModel(model, jsonMode);
       if (attempt.ok) return { ok: true, analysis: attempt.analysis };

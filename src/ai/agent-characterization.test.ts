@@ -215,15 +215,24 @@ describe("kegagalan provider", () => {
     });
 
     expect(mocks.executeToolsParallel).toHaveBeenCalledTimes(1);
-    // Dua panggilan saja: putaran pertama, lalu putaran kedua yang gagal. Tidak
-    // ada percobaan ke model cadangan.
-    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    // Yang dijaga adalah MODEL-nya, bukan jumlah panggilannya: putus jaringan
+    // diulang pada model yang sama (permintaan identik, belum tentu sampai ke
+    // penyedia), tapi tidak satu pun percobaan boleh mendarat di model cadangan
+    // — di situlah seluruh putaran, termasuk tool tulisnya, akan dijalankan ulang.
+    const models = mocks.fetch.mock.calls.map((_, i) => bodyOf(i).model);
+    expect(new Set(models)).toEqual(new Set(["test/model"]));
     expect(reply.text).toContain("Periksa dashboard");
   });
 
   it("berpindah ke model cadangan saat gagal sebelum ada tool yang jalan", async () => {
     const config = { ...CONFIG, fallbackModels: ["cadangan/satu"] };
-    mocks.fetch.mockRejectedValueOnce(new Error("model utama mati"));
+    // 400 = permintaannya yang ditolak model ini, bukan gangguan sementara.
+    // Mengulanginya sia-sia, jadi rantai fallback langsung dipakai.
+    mocks.fetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () => "model tidak dikenal",
+    });
     mocks.fetch.mockResolvedValue({
       ok: true,
       json: async () => ({ choices: [{ message: { role: "assistant", content: "Halo." } }] }),
@@ -233,6 +242,22 @@ describe("kegagalan provider", () => {
 
     expect(reply.text).toBe("Halo.");
     expect(bodyOf(1).model).toBe("cadangan/satu");
+  });
+
+  // Perilaku baru, dan bedanya nyata: dulu satu 503 sesaat langsung menurunkan
+  // percakapan ke model cadangan yang lebih lemah untuk sisa jawabannya.
+  it("mengulang model utama dulu sebelum menyerah ke model cadangan", async () => {
+    const config = { ...CONFIG, fallbackModels: ["cadangan/satu"] };
+    mocks.fetch.mockResolvedValueOnce({ ok: false, status: 503, text: async () => "sibuk" });
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { role: "assistant", content: "Halo." } }] }),
+    });
+
+    const reply = await runFinanceAgent({ userId: "u1", message: "halo", config, channel: "WEB" });
+
+    expect(reply.text).toBe("Halo.");
+    expect(bodyOf(1).model).toBe("test/model");
   });
 
   it("menyerah dengan pesan aman saat semua model gagal", async () => {

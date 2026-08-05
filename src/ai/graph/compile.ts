@@ -60,6 +60,12 @@ export type ChatPlan = {
     temperature: number;
     maxRounds: number;
     useFallbackModels: boolean;
+    /** Batas satu panggilan HTTP ke penyedia. */
+    requestTimeoutMs: number;
+    /** Percobaan ulang untuk kegagalan sementara saja, per panggilan. */
+    maxRetries: number;
+    /** Batas keras seluruh run: semua putaran, model cadangan, dan retry. */
+    totalBudgetMs: number;
   };
   tools: { enabled: string[]; maxToolCalls: number; dedupeIdenticalCalls: boolean } | null;
   guard: { enforceWriteClaim: boolean; enforceGroundedFigures: boolean } | null;
@@ -68,7 +74,13 @@ export type ChatPlan = {
 export type HeartbeatPlan = {
   nodeIds: Partial<Record<AgentNodeKind, string>>;
   schedule: { defaultHour: number; daily: boolean; weekly: boolean; monthly: boolean };
-  analyst: { modelOverride: string; temperature: number };
+  analyst: {
+    modelOverride: string;
+    temperature: number;
+    requestTimeoutMs: number;
+    maxRetries: number;
+    totalBudgetMs: number;
+  };
   dispatch: { telegram: boolean; webPush: boolean; monthlyAttachment: boolean };
 };
 
@@ -290,6 +302,9 @@ function compileChat(data: AgentGraphData): ChatPlan | null {
       temperature: readNumber(llm, "temperature"),
       maxRounds: readNumber(llm, "maxRounds"),
       useFallbackModels: readBoolean(llm, "useFallbackModels"),
+      requestTimeoutMs: readNumber(llm, "requestTimeoutMs"),
+      maxRetries: readNumber(llm, "maxRetries"),
+      totalBudgetMs: readNumber(llm, "totalBudgetMs"),
     },
     tools: tools
       ? {
@@ -329,6 +344,9 @@ function compileHeartbeat(data: AgentGraphData): HeartbeatPlan | null {
     analyst: {
       modelOverride: readText(analyst, "modelOverride"),
       temperature: readNumber(analyst, "temperature"),
+      requestTimeoutMs: readNumber(analyst, "requestTimeoutMs"),
+      maxRetries: readNumber(analyst, "maxRetries"),
+      totalBudgetMs: readNumber(analyst, "totalBudgetMs"),
     },
     dispatch: {
       telegram: readBoolean(dispatch, "telegram"),

@@ -21,6 +21,13 @@ describe("graph bawaan", () => {
       temperature: 0.2, // agent.ts:353
       maxRounds: 6, // agent.ts:47  MAX_AGENT_ROUNDS
       useFallbackModels: true,
+      // Tiga angka ini tidak punya asal-usul di runtime lama — di sana memang
+      // tidak ada batas waktu sama sekali, dan itulah cacatnya: `fetch` Node
+      // menunggu selamanya. Defaultnya dipilih longgar supaya jawaban panjang
+      // yang sah tidak ikut terpotong.
+      requestTimeoutMs: 60000,
+      maxRetries: 2,
+      totalBudgetMs: 180000,
     });
     expect(chat!.tools).toEqual({
       enabled: agentTools.map((t) => t.name),

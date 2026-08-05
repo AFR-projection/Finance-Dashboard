@@ -17,6 +17,7 @@ import { emitAgentEvent, newRunId } from "@/lib/agent-telemetry";
 import { prisma } from "@/lib/db";
 import { analyzeHeartbeat } from "./analyst";
 import { dispatchHeartbeat } from "./dispatch";
+import { markHeartbeatAlive } from "./liveness";
 import { collectSnapshot } from "./signals";
 
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
@@ -482,6 +483,12 @@ export async function tickHeartbeat(now = new Date()): Promise<number> {
       const reason = err instanceof Error ? err.message.slice(0, 300) : "unknown";
       await finishRun(claimId, { status: "failed", reason }, startedAtMs);
       log.error({ err, userId: setting.userId, periodKey }, "Siklus heartbeat gagal");
+    } finally {
+      // Worker hanya menulis tanda hidup di antara dua tick, dan TTL-nya 150
+      // detik. Satu tick dengan beberapa user yang masing-masing memakai
+      // anggaran waktunya sudah cukup melewati TTL itu — panel /system lalu
+      // melaporkan worker mati justru saat ia sedang bekerja paling keras.
+      await markHeartbeatAlive();
     }
   }
 

@@ -15,6 +15,12 @@ const mocks = vi.hoisted(() => ({
   appendHistory: vi.fn(),
   recordAiUsage: vi.fn(),
   fetch: vi.fn(),
+  emitAgentEvent: vi.fn(),
+}));
+
+vi.mock("@/lib/agent-telemetry", () => ({
+  emitAgentEvent: mocks.emitAgentEvent,
+  newRunId: () => "run-uji",
 }));
 
 vi.mock("../tool-executor", () => ({ executeToolsParallel: mocks.executeToolsParallel }));
@@ -208,10 +214,51 @@ describe("node penalaran LLM", () => {
       message: "halo",
       config: { ...CONFIG, fallbackModels: ["cadangan/satu"] },
       channel: "WEB",
-      plan: planWith((p) => ({ ...p, llm: { ...p.llm, useFallbackModels: false } })),
+      // maxRetries 0 memisahkan yang sedang diuji: tanpa itu, jumlah panggilan
+      // bercampur antara percobaan ulang dan perpindahan model.
+      plan: planWith((p) => ({
+        ...p,
+        llm: { ...p.llm, useFallbackModels: false, maxRetries: 0 },
+      })),
     });
 
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("memakai batas percobaan ulang dari config node", async () => {
+    mocks.fetch.mockRejectedValue(new Error("mati"));
+
+    await runFinanceAgent({
+      userId: "u1",
+      message: "halo",
+      config: CONFIG,
+      channel: "WEB",
+      plan: planWith((p) => ({
+        ...p,
+        llm: { ...p.llm, useFallbackModels: false, maxRetries: 3 },
+      })),
+    });
+
+    // Satu percobaan awal + tiga ulangan, semuanya pada model yang sama.
+    expect(mocks.fetch).toHaveBeenCalledTimes(4);
+  });
+
+  // Batas per panggilan saja tidak cukup: enam putaran × tiga model × tiga
+  // percobaan masih bisa menahan satu pesan berpuluh menit.
+  it("menyerah dengan pesan aman begitu batas waktu total habis", async () => {
+    queueReply({ role: "assistant", content: "Halo." });
+
+    const reply = await runFinanceAgent({
+      userId: "u1",
+      message: "halo",
+      config: CONFIG,
+      channel: "WEB",
+      plan: planWith((p) => ({ ...p, llm: { ...p.llm, totalBudgetMs: 0 } })),
+    });
+
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(reply.text).toContain("Data Anda tidak diubah");
+    expect(reply.failure).toBeTruthy();
   });
 });
 
@@ -227,6 +274,52 @@ describe("node pemicu", () => {
 
     expect(reply.text).toContain("tidak melayani kanal ini");
     expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Konsol admin adalah satu-satunya jendela ke apa yang benar-benar terjadi di
+ * VPS. Kalau ia melaporkan hijau saat penyedia mati total, jendelanya bukan
+ * cuma tidak berguna — ia menyesatkan orang yang sedang mencari penyebab.
+ */
+describe("status run yang dilaporkan ke konsol", () => {
+  const endEvents = () =>
+    mocks.emitAgentEvent.mock.calls
+      .map(([event]) => event as { type: string; status?: string })
+      .filter((event) => event.type === "run:end");
+
+  it("melaporkan ok saat balasannya benar-benar dari model", async () => {
+    queueReply({ role: "assistant", content: "Halo." });
+
+    await runFinanceAgent({ userId: "u1", message: "halo", config: CONFIG, channel: "WEB" });
+
+    expect(endEvents()).toEqual([expect.objectContaining({ status: "ok" })]);
+  });
+
+  it("melaporkan error saat user cuma menerima teks darurat", async () => {
+    mocks.fetch.mockRejectedValue(new Error("mati total"));
+
+    const reply = await runFinanceAgent({
+      userId: "u1",
+      message: "halo",
+      config: CONFIG,
+      channel: "WEB",
+    });
+
+    expect(reply.text).toContain("Data Anda tidak diubah");
+    expect(endEvents()).toEqual([expect.objectContaining({ status: "error" })]);
+  });
+
+  // Tanpa penutup di jalur lemparan, run-nya berhenti di "berjalan" selamanya
+  // dan tidak bisa dibedakan dari run yang memang masih bekerja.
+  it("menutup run yang melempar, tepat sekali", async () => {
+    mocks.loadHistory.mockRejectedValue(new Error("redis mati"));
+
+    await expect(
+      runFinanceAgent({ userId: "u1", message: "halo", config: CONFIG, channel: "WEB" }),
+    ).rejects.toThrow("redis mati");
+
+    expect(endEvents()).toEqual([expect.objectContaining({ status: "error" })]);
   });
 });
 
